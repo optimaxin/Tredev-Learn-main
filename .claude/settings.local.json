@@ -55,5 +55,8 @@
       "Bash(curl -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"staff@tredevlearn.com\",\"password\":\"Staff@123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
       "Bash(awk '/create table \\(if not exists \\)?\\(offerings|live_sessions|certificates|acharya_content|enrollments\\)/{f=1} f{print} /\\\\\\);/{if\\(f\\)f=0}' schema.sql)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ]
 }
