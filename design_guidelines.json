@@ -1,0 +1,157 @@
+{
+  "theme_strategy": "Dual Theme (Light & Dark). Light theme represents daytime academic rigor (ink-and-parchment). Dark theme represents cosmic/ritualistic depth (Shloka recitation, Sadhana, Night studies).",
+  "typography": {
+    "fonts": [
+      {
+        "family": "Cormorant Garamond",
+        "usage": "Latin Headings (H1-H3). Conveys university-grade academic rigor and elegant editorial feel. Never use Inter/Roboto.",
+        "weights": ["400", "500", "600", "700"]
+      },
+      {
+        "family": "Manrope",
+        "usage": "Latin Body text, UI labels, small caps overlines. Clean, humanist sans-serif that balances the traditional serif, offering the 'streaming site' accessibility.",
+        "weights": ["400", "500", "600"]
+      },
+      {
+        "family": "Tiro Devanagari Sanskrit",
+        "usage": "Primary Devanagari text (Shlokas, Mantras). Exquisite, traditional serif designed specifically for Sanskrit typographic rigor.",
+        "weights": ["400", "italic"]
+      },
+      {
+        "family": "Noto Serif Devanagari",
+        "usage": "Fallback/UI Devanagari where Tiro is too stylistic.",
+        "weights": ["400", "500", "600"]
+      }
+    ],
+    "hierarchy": {
+      "h1": "text-5xl md:text-6xl+ font-serif tracking-tight leading-none",
+      "h2": "text-3xl md:text-4xl font-serif tracking-tight",
+      "h3": "text-2xl font-serif tracking-tight",
+      "body": "text-base font-sans leading-relaxed text-foreground/80",
+      "overline": "text-xs font-sans uppercase tracking-[0.2em] font-medium",
+      "shloka_main": "text-4xl md:text-5xl font-devanagari leading-relaxed tracking-wide text-primary"
+    }
+  },
+  "colors": {
+    "light": {
+      "background": "#F7F5F0",
+      "surface": "#FFFFFF",
+      "foreground": "#1A1817",
+      "primary": "#A74B39",
+      "primary_hover": "#8C3D2D",
+      "secondary": "#2C4641",
+      "accent": "#B59250",
+      "muted": "#E2DDD0",
+      "muted_foreground": "#6C665F",
+      "border": "#E2DDD0"
+    },
+    "dark": {
+      "background": "#08090C",
+      "surface": "#12141A",
+      "foreground": "#EAE6DF",
+      "primary": "#C16450",
+      "primary_hover": "#D87B67",
+      "secondary": "#223530",
+      "accent": "#D4AF37",
+      "muted": "#252830",
+      "muted_foreground": "#9A958E",
+      "border": "#252830"
+    }
+  },
+  "visual_enhancers": {
+    "textures": "Subtle SVG noise filter overlay (opacity 2-3%) across the entire background to simulate ancient parchment/vellum feel, removing pure digital flatness.",
+    "glassmorphism": "Crystal Glass variant (high blur backdrop-blur-2xl, saturated background, 1px bright inner border) specifically reserved for the Shloka Player floating controls and Sticky Navigations.",
+    "borders": "1px solid borders using muted tones. Avoid thick borders. Soft internal glowing borders on active elements.",
+    "shadows": "Ambient diffuse shadows for Light mode. Dark mode relies on 1px subtle borders (border-white/10) instead of shadows."
+  },
+  "grids_and_layouts": {
+    "philosophy": "Generous whitespace (p-12 to p-24), left-aligned asymmetry. Avoid center-everything designs.",
+    "course_discovery": "Bento Grid (Mode A). Spans varying from col-span-4 to col-span-8. Some cards feature massive typography, others rich imagery. Never perfect uniform rows.",
+    "admin_portals": "High Density Grid (Mode B). Tighter gaps, strictly utilitarian, leveraging monochrome hierarchy with clear functional color coding.",
+    "spacing_scale": "p-2, p-4, p-6, p-8, p-12, p-16, p-24. Containers must have internal padding (p-8) to prevent text collision."
+  },
+  "component_blueprints": {
+    "shloka_player": {
+      "concept": "The Jewel of the platform. A cinematic, immersive experience.",
+      "layout": "Asymmetric overlay. Left side: Massive Devanagari verse (Tiro Devanagari Sanskrit) with IAST transliteration below it. Right side: Grammatical breakdown and attributed commentary.",
+      "interactions": "Hovering over a Devanagari word highlights the exact IAST and English translation simultaneously (Word-by-word grammar map).",
+      "audio_controls": "Floating crystal glass bar at the bottom. Play/Pause, Speed Control, 'Record Yourself' button with terracotta glowing state, delicate audio waveform visualizer."
+    },
+    "sadhana_daily_view": {
+      "concept": "Ritual, not a dashboard. Meditative, distraction-free.",
+      "layout": "Centered concentric circles forming a large 'Japa Counter' that users tap. Surrounding space is highly negative (empty).",
+      "streak_system": "Compassionate design: missed days are shown as fading/dimmed dots in a lunar phase arc, rather than a broken chain or red '0'.",
+      "typography": "Sankalpa (vow) text displayed in elegant serif italics."
+    },
+    "course_discovery_grid": {
+      "concept": "University catalog meets modern streaming site.",
+      "layout": "Asymmetric masonry/bento grid. Use high-contrast imagery overlaid with heavy gradients for text readability. Badges for 'Credentialed' or 'Live Session'.",
+      "interactions": "Hover states scale the image subtly (1.05) and reveal course syllabus preview."
+    },
+    "calculators_panchang_kundli": {
+      "concept": "Scientific, astrological disciplines. No fortune-telling.",
+      "layout": "Dense but highly legible data tables. Linear, border-bottom focused inputs (no heavy boxes). Output graphs (Kundli) rendered with crisp SVG geometry, neutral tones.",
+      "forms": "Step-by-step wizard style to prevent cognitive overload. Generous padding."
+    },
+    "pathway_consultation_form": {
+      "concept": "Human top-of-funnel.",
+      "layout": "Split screen. Left: Editorial photo of an Acharya + Trust markers. Right: Minimalist form (Name, Email, Phone, Consent) with a warm terracotta CTA button."
+    },
+    "acharya_profile": {
+      "concept": "Parampara (Lineage) showcase.",
+      "layout": "Editorial layout. Large portrait. A 'Lineage Tree' visual component. List of credentials and sign-offs on courses.",
+      "typography": "Heavy reliance on Serif for their quotes/teaching philosophy."
+    },
+    "admin_capability_matrix": {
+      "concept": "Utilitarian Governance.",
+      "layout": "Dense data table (Shadcn Table) with sticky headers. Rows = Staff, Columns = Capabilities (Course Builder, Grader, Doubts). Boolean toggle switches (Neumorphic tactile variant)."
+    }
+  },
+  "motion_and_interactions": {
+    "philosophy": "Ritualistic, deliberate, unhurried.",
+    "transitions": "Longer durations (0.4s to 0.6s) with ease-out-expo for page elements. Avoid bouncy springs. Use smooth fades and gentle vertical drifts.",
+    "hover_states": "Text colors gently transition, borders glow. Avoid harsh scaling except for hero/course cards (max 1.05 scale).",
+    "shloka_sync": "Highlighting words during audio playback should crossfade smoothly, feeling like a glowing ember moving through the text."
+  },
+  "media": {
+    "image_urls": {
+      "ancient_manuscript_texture": [
+        "https://images.pexels.com/photos/15235034/pexels-photo-15235034.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+      ],
+      "temple_architecture_abstract": [
+        "https://images.unsplash.com/photo-1658658160512-878184180267?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwyfHxoaW5kdSUyMHRlbXBsZSUyMHNpbGhvdWV0dGUlMjBtaW5pbWFsJTIwYXJjaGl0ZWN0dXJlfGVufDB8fHx8MTc4MjExNjM4OHww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1615196570203-222ade7954da?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwxfHxoaW5kdSUyMHRlbXBsZSUyMHNpbGhvdWV0dGUlMjBtaW5pbWFsJTIwYXJjaGl0ZWN0dXJlfGVufDB8fHx8MTc4MjExNjM4OHww&ixlib=rb-4.1.0&q=85"
+      ],
+      "meditation_sadhana": [
+        "https://images.unsplash.com/photo-1506126613408-eca07ce68773?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHxwZXJzb24lMjBtZWRpdGF0aW5nJTIwY2FsbSUyMHdhcm0lMjBsaWdodHxlbnwwfHx8fDE3ODM0NTUxMTl8MA&ixlib=rb-4.1.0&q=85"
+      ],
+      "study_learning": [
+        "https://images.pexels.com/photos/7128756/pexels-photo-7128756.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "https://images.unsplash.com/photo-1699430245381-ad5be3690d26?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MDV8MHwxfHNlYXJjaHwxfHxwZXJzb24lMjBzdHVkeWluZyUyMGZvY3VzZWQlMjB3YXJtJTIwbGlnaHRpbmd8ZW58MHx8fHwxNzgzNDQ1MjQ1fDA&ixlib=rb-4.1.0&q=85"
+      ]
+    },
+    "usage_instructions": "Images should primarily be used as ambient backgrounds with heavy contrast overlays (bg-black/40 to bg-black/60) to allow text to breathe, or cropped as sharp geometric assets in Bento grids."
+  },
+  "accessibility": {
+    "contrast": "Ensure APCA contrast compliance. All small text must have minimum 4.5:1 contrast. Use pure primary color strictly for CTAs to avoid dilution.",
+    "typography": "Devanagari text MUST have increased line-height (leading-loose or leading-[1.8]) and larger base sizes (text-lg minimum) to accommodate complex conjuncts (samyuktakshara) and matras.",
+    "testing": "All interactive elements, forms, counters, and shloka interactions MUST have data-testid attributes."
+  },
+  "instructions_to_main_agent": [
+    "CRITICAL: Generate .js files, NOT .tsx files. Use standard React + JS syntax.",
+    "CRITICAL: Do NOT use absolute transparent backgrounds for dropdowns, overlays, or sticky headers. Always use Solid or Glassmorphism backgrounds.",
+    "Use Lucide-react for UI icons. Use Phosphor Icons for dense Admin portals if needed.",
+    "Ensure 'Cormorant Garamond', 'Manrope', and 'Tiro Devanagari Sanskrit' are imported from Google Fonts in the root HTML/CSS.",
+    "Do NOT use default Inter, Roboto, or Poppins anywhere.",
+    "Implement the Dual Theme (Light/Dark) toggle globally, defaulting to Light mode for the main site, but allowing Shloka Player to force Dark mode for immersion if desired."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Avoid generic 'AI slop' aesthetics. Do not use simplistic center-everything layouts. Create depth through layered design and z-index hierarchy.",
+    "Do not use universal transitions (transition: all). Target specific properties (transition-colors, transition-transform) to prevent transform breakage.",
+    "Do NOT add '.App { text-align: center; }' to global CSS. Align text to the left by default to respect reading flow.",
+    "Always use modern button styles (pill-shaped or sharp) with explicit hover/focus states.",
+    "NEVER use emojis (🤖🧠💭) as UI icons.",
+    "All interactive and key informational elements MUST include a 'data-testid' attribute (e.g., data-testid='shloka-play-btn').",
+    "Use 'sonner' for toast notifications."
+  ]
+}

@@ -1,0 +1,2180 @@
+"""
+Tredev Learn - Backend API
+Monolithic FastAPI application covering all 4 portals.
+"""
+from dotenv import load_dotenv
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+import os
+import re
+import logging
+import secrets
+import random
+import requests
+import panchang
+from datetime import datetime, timezone, timedelta, date
+from typing import List, Optional, Any, Dict
+
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
+
+import db as dbmod
+from db import db
+import firebase_auth
+from firebase_auth import AuthError
+
+# ==================== SETUP ====================
+# Postgres (Supabase) connection string; pool is created on startup.
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+# Supabase Storage (for recorded-lesson video uploads via signed URLs).
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+COURSE_MEDIA_BUCKET = os.environ.get("COURSE_MEDIA_BUCKET", "course-media")
+
+
+def ObjectId(x):
+    """Compatibility shim: ids are uuid strings now, not bson ObjectIds."""
+    return str(x)
+
+
+app = FastAPI(title="Tredev Learn API")
+api_router = APIRouter(prefix="/api")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+# ==================== HELPERS ====================
+def now_utc():
+    return datetime.now(timezone.utc)
+
+def to_iso(dt: datetime) -> str:
+    return dt.isoformat()
+
+def sanitize_user(u: dict) -> dict:
+    if not u:
+        return u
+    u = dict(u)
+    u["id"] = str(u.get("_id", u.get("id", "")))
+    u.pop("_id", None)
+    u.pop("password_hash", None)
+    # dates to iso if datetime
+    for k, v in list(u.items()):
+        if isinstance(v, datetime):
+            u[k] = v.isoformat()
+    return u
+
+def sanitize_doc(d: dict) -> dict:
+    if not d:
+        return d
+    d = dict(d)
+    d["id"] = str(d.get("_id", d.get("id", "")))
+    d.pop("_id", None)
+    for k, v in list(d.items()):
+        if isinstance(v, datetime):
+            d[k] = v.isoformat()
+    return d
+
+
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        decoded = await firebase_auth.verify_id_token(token)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    uid = decoded.get("uid") or decoded.get("user_id")
+    user = await db.users.find_one({"firebase_uid": uid})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return sanitize_user(user)
+
+
+def require_role(*roles):
+    async def checker(user: dict = Depends(get_current_user)):
+        if user.get("role") not in roles:
+            raise HTTPException(status_code=403, detail=f"Requires role in {roles}")
+        return user
+    return checker
+
+
+async def write_audit(actor: dict, action: str, target: str = "", meta: dict = None):
+    await db.audit_log.insert_one({
+        "actor_id": actor.get("id"),
+        "actor_email": actor.get("email"),
+        "actor_role": actor.get("role"),
+        "action": action,
+        "target": target,
+        "meta": meta or {},
+        "created_at": now_utc().isoformat(),
+    })
+
+
+# ==================== MODELS ====================
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: str
+    role: Optional[str] = "learner"  # only learner allowed via public register
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+class ConsultationIn(BaseModel):
+    name: str
+    email: EmailStr
+    phone: str
+    interest: str
+    consent: bool
+
+class LessonProgressIn(BaseModel):
+    lesson_id: str
+    done: bool = True
+
+class EnrollIn(BaseModel):
+    offering_id: str
+
+class SadhanaCheckinIn(BaseModel):
+    offering_id: str
+    japa_count: int = 0
+    notes: Optional[str] = ""
+
+class SankalpaIn(BaseModel):
+    offering_id: str
+    sankalpa: str
+
+class OfferingIn(BaseModel):
+    title: str
+    subtitle: Optional[str] = ""
+    description: str
+    type: str  # masterclass, webinar, workshop, recorded_course, live_course, sadhana, ebook
+    track: str  # A, B, or C
+    subject: str
+    price_inr: int = 0
+    price_usd: int = 0
+    duration: Optional[str] = ""
+    acharya_id: Optional[str] = ""
+    verses: List[str] = []
+    modules: List[dict] = []
+    image_url: Optional[str] = ""
+    is_published: bool = False
+    festival: Optional[str] = ""
+    start_date: Optional[str] = ""
+
+class VerseIn(BaseModel):
+    scripture: str  # Bhagavad Gita, Rigveda, etc
+    reference: str  # 2.47
+    devanagari: str
+    iast: str
+    word_by_word: List[dict] = []  # [{sanskrit, iast, meaning}]
+    translations: List[dict] = []  # [{author, text}]
+    commentaries: List[dict] = []  # [{author, text}]
+    audio_url: Optional[str] = ""
+
+class MantraIn(BaseModel):
+    deity: str
+    title: str
+    devanagari: Optional[str] = ""
+    iast: Optional[str] = ""
+    meaning: Optional[str] = ""
+    audio_url: Optional[str] = ""
+
+class QuizIn(BaseModel):
+    offering_id: str
+    title: str
+    questions: List[dict]  # [{q, options[], correct_index}]
+
+class QuizAttemptIn(BaseModel):
+    quiz_id: str
+    answers: List[int]
+
+class DoubtIn(BaseModel):
+    offering_id: str
+    question: str
+
+class DoubtAnswerIn(BaseModel):
+    answer: str
+
+class AcharyaContentIn(BaseModel):
+    title: str
+    body: str
+    offering_id: Optional[str] = ""
+    kind: str = "lecture_note"  # lecture_note, verse_commentary, lesson_draft
+    verse_id: Optional[str] = ""
+
+class AcharyaContentReviewIn(BaseModel):
+    approved: bool
+    notes: Optional[str] = ""
+
+class LiveSessionCreateIn(BaseModel):
+    title: str
+    offering_id: Optional[str] = ""   # blank = standalone session (not tied to a course)
+    acharya_id: str
+    starts_at: str
+    duration_min: int = 60
+    mode: str = "interactive"  # interactive, broadcast
+    join_url: Optional[str] = ""
+    topic: Optional[str] = ""          # description for standalone (non-course) sessions
+
+class LiveSessionUpdateIn(BaseModel):
+    title: Optional[str] = None
+    offering_id: Optional[str] = None
+    acharya_id: Optional[str] = None
+    starts_at: Optional[str] = None
+    duration_min: Optional[int] = None
+    mode: Optional[str] = None
+    join_url: Optional[str] = None
+    topic: Optional[str] = None
+
+class WebinarCreateIn(BaseModel):
+    title: str
+    cover_image: str = ""
+    starts_at: str
+    duration_min: int = 90
+    price_inr: int = 0
+    orig_price_inr: int = 0
+    mentor_name: str = ""
+    mentor_id: Optional[str] = ""
+    description: str = ""
+    seats_remaining: int = 100
+    join_url: Optional[str] = ""
+
+class CertificateIssueIn(BaseModel):
+    user_id: str
+    offering_id: str
+
+class CertificateSignIn(BaseModel):
+    signature_name: str
+
+class SignUploadIn(BaseModel):
+    filename: str
+    content_type: Optional[str] = "application/octet-stream"
+
+class ApprovalDecisionIn(BaseModel):
+    approved: bool
+    notes: Optional[str] = ""
+
+class CapabilityGrantIn(BaseModel):
+    staff_id: str
+    capability: str  # course_builder, quiz_author, grader, doubts, consultations, cohorts
+    scope: List[str] = []  # offering ids, or ["*"] for all
+
+class CommunityPostIn(BaseModel):
+    body: str
+    verse_id: Optional[str] = ""
+
+class UserUpdateIn(BaseModel):
+    role: Optional[str] = None
+    parampara: Optional[str] = None
+    bio: Optional[str] = None
+    name: Optional[str] = None
+
+
+# ==================== AUTH ENDPOINTS ====================
+@api_router.post("/auth/register")
+async def register(data: RegisterIn, response: Response):
+    email = data.email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    role = "learner"  # public registration only for learners
+    # Create the identity in Firebase (owns the password) and get a token.
+    try:
+        fb_uid, token = await firebase_auth.sign_up(email, data.password)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    doc = {
+        "firebase_uid": fb_uid,
+        "email": email,
+        "name": data.name,
+        "role": role,
+        "created_at": now_utc().isoformat(),
+        "avatar_url": "",
+        "bio": "",
+        "parampara": "",
+    }
+    result = await db.users.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    response.set_cookie("access_token", token, httponly=True, secure=False,
+                        samesite="lax", max_age=7*24*3600, path="/")
+    return {"user": sanitize_user(doc), "token": token}
+
+
+@api_router.post("/auth/login")
+async def login(data: LoginIn, response: Response):
+    email = data.email.lower()
+    # Firebase verifies the password and issues the ID token.
+    try:
+        fb_uid, token = await firebase_auth.sign_in(email, data.password)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    user = await db.users.find_one({"firebase_uid": fb_uid})
+    if not user:
+        # Firebase account exists but no local profile — self-heal one.
+        doc = {
+            "firebase_uid": fb_uid, "email": email, "name": email.split("@")[0],
+            "role": "learner", "created_at": now_utc().isoformat(),
+            "avatar_url": "", "bio": "", "parampara": "",
+        }
+        result = await db.users.insert_one(doc)
+        doc["_id"] = result.inserted_id
+        user = doc
+    response.set_cookie("access_token", token, httponly=True, secure=False,
+                        samesite="lax", max_age=7*24*3600, path="/")
+    return {"user": sanitize_user(user), "token": token}
+
+
+@api_router.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    return {"ok": True}
+
+
+@api_router.get("/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    return {"user": user}
+
+
+# ==================== USERS ====================
+@api_router.get("/users")
+async def list_users(user: dict = Depends(require_role("admin", "super_admin"))):
+    users = await db.users.find({}).to_list(1000)
+    return [sanitize_user(u) for u in users]
+
+
+@api_router.patch("/users/{user_id}")
+async def update_user(user_id: str, data: UserUpdateIn,
+                       actor: dict = Depends(require_role("admin", "super_admin"))):
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "role" in update and update["role"] not in ["learner", "acharya", "academic_staff", "admin"]:
+        # super_admin cannot be assigned by admin, only super_admin can appoint super_admin
+        if update["role"] == "super_admin" and actor["role"] != "super_admin":
+            raise HTTPException(403, "Only super_admin can appoint super_admin")
+    if update:
+        await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update})
+    await write_audit(actor, "user.update", user_id, update)
+    u = await db.users.find_one({"_id": ObjectId(user_id)})
+    return sanitize_user(u)
+
+
+@api_router.get("/acharyas")
+async def list_acharyas():
+    acharyas = await db.users.find({"role": "acharya"}).to_list(200)
+    return [sanitize_user(a) for a in acharyas]
+
+
+@api_router.get("/learners")
+async def list_learners(actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Learner directory for staff (e.g. issuing certificates)."""
+    learners = await db.users.find({"role": "learner"}).to_list(2000)
+    return [sanitize_user(u) for u in learners]
+
+
+# ==================== OFFERINGS (Courses/Sadhanas/etc) ====================
+@api_router.get("/offerings")
+async def list_offerings(track: Optional[str] = None, type: Optional[str] = None,
+                          subject: Optional[str] = None, published_only: bool = True):
+    q = {}
+    if published_only:
+        q["is_published"] = True
+    if track:
+        q["track"] = track
+    if type:
+        q["type"] = type
+    if subject:
+        q["subject"] = subject
+    items = await db.offerings.find(q).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.get("/offerings/{offering_id}")
+async def get_offering(offering_id: str):
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    if not o:
+        raise HTTPException(404, "Offering not found")
+    result = sanitize_doc(o)
+    # attach acharya profile
+    if o.get("acharya_id"):
+        try:
+            a = await db.users.find_one({"_id": ObjectId(o["acharya_id"])})
+            result["acharya"] = sanitize_user(a) if a else None
+        except Exception:
+            result["acharya"] = None
+    # attach verses
+    verse_ids = o.get("verses", [])
+    verses = []
+    for vid in verse_ids:
+        try:
+            v = await db.verses.find_one({"_id": ObjectId(vid)})
+            if v:
+                verses.append(sanitize_doc(v))
+        except Exception:
+            pass
+    result["verses_full"] = verses
+    return result
+
+
+@api_router.post("/offerings")
+async def create_offering(data: OfferingIn,
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    if not (data.acharya_id or "").strip():
+        raise HTTPException(400, "Assign an Ācharya — every course must be routed to one for sign-off.")
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    doc["approved_by_acharya"] = False
+    doc["approval_notes"] = ""
+    result = await db.offerings.insert_one(doc)
+    await write_audit(actor, "offering.create", str(result.inserted_id), {"title": data.title})
+    doc["_id"] = result.inserted_id
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/offerings/{offering_id}")
+async def update_offering(offering_id: str, data: dict,
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    data.pop("id", None)
+    await db.offerings.update_one({"_id": ObjectId(offering_id)}, {"$set": data})
+    await write_audit(actor, "offering.update", offering_id, data)
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    return sanitize_doc(o)
+
+
+@api_router.post("/offerings/{offering_id}/approval")
+async def approve_offering(offering_id: str, decision: ApprovalDecisionIn,
+                             actor: dict = Depends(require_role("acharya"))):
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    if not o:
+        raise HTTPException(404, "Not found")
+    if o.get("acharya_id") != actor["id"]:
+        raise HTTPException(403, "Only the assigned Acharya can approve")
+    await db.offerings.update_one({"_id": ObjectId(offering_id)},
+        {"$set": {"approved_by_acharya": decision.approved,
+                  "approval_notes": decision.notes,
+                  "approved_at": now_utc().isoformat()}})
+    await write_audit(actor, "offering.approve" if decision.approved else "offering.reject",
+                      offering_id, {"notes": decision.notes})
+    return {"ok": True}
+
+
+# ==================== VERSES (Shloka Player source) ====================
+@api_router.get("/verses")
+async def list_verses(scripture: Optional[str] = None, limit: int = 50):
+    q = {}
+    if scripture:
+        q["scripture"] = scripture
+    items = await db.verses.find(q).limit(limit).to_list(limit)
+    return [sanitize_doc(v) for v in items]
+
+
+@api_router.get("/verses/{verse_id}")
+async def get_verse(verse_id: str):
+    v = await db.verses.find_one({"_id": ObjectId(verse_id)})
+    if not v:
+        raise HTTPException(404, "Verse not found")
+    return sanitize_doc(v)
+
+
+@api_router.get("/shloka-of-day")
+async def shloka_of_day():
+    verses = await db.verses.find({}).to_list(200)
+    if not verses:
+        return {}
+    today = date.today().toordinal()
+    idx = today % len(verses)
+    return sanitize_doc(verses[idx])
+
+
+@api_router.post("/verses")
+async def create_verse(data: VerseIn,
+                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    result = await db.verses.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return sanitize_doc(doc)
+
+
+# ==================== ENROLLMENTS ====================
+@api_router.post("/enrollments")
+async def enroll(data: EnrollIn, user: dict = Depends(get_current_user)):
+    existing = await db.enrollments.find_one({"user_id": user["id"], "offering_id": data.offering_id})
+    if existing:
+        return sanitize_doc(existing)
+    doc = {
+        "user_id": user["id"],
+        "offering_id": data.offering_id,
+        "enrolled_at": now_utc().isoformat(),
+        "progress": 0,
+        "completed_lessons": [],
+        "status": "active",
+    }
+    result = await db.enrollments.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return sanitize_doc(doc)
+
+
+@api_router.get("/enrollments/mine")
+async def my_enrollments(user: dict = Depends(get_current_user)):
+    enrolls = await db.enrollments.find({"user_id": user["id"]}).to_list(500)
+    result = []
+    for e in enrolls:
+        e = sanitize_doc(e)
+        try:
+            o = await db.offerings.find_one({"_id": ObjectId(e["offering_id"])})
+            if o:
+                e["offering"] = sanitize_doc(o)
+        except Exception:
+            pass
+        result.append(e)
+    return result
+
+
+@api_router.post("/enrollments/{offering_id}/complete-lesson")
+async def complete_lesson(offering_id: str, data: LessonProgressIn,
+                          user: dict = Depends(get_current_user)):
+    """Toggle a lesson's completion for the learner and recompute progress %."""
+    e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
+    if not e:
+        raise HTTPException(404, "Not enrolled in this course")
+    done_ids = list(e.get("completed_lessons") or [])
+    if data.done and data.lesson_id not in done_ids:
+        done_ids.append(data.lesson_id)
+    elif not data.done and data.lesson_id in done_ids:
+        done_ids.remove(data.lesson_id)
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    total = len(o.get("modules") or []) if o else 0
+    progress = round(len(done_ids) / total * 100) if total else 0
+    status = "completed" if total and len(done_ids) >= total else "active"
+    await db.enrollments.update_one(
+        {"user_id": user["id"], "offering_id": offering_id},
+        {"$set": {"completed_lessons": done_ids, "progress": progress, "status": status}})
+    return {"ok": True, "completed_lessons": done_ids, "progress": progress, "status": status}
+
+
+# ==================== SADHANA ====================
+@api_router.post("/sadhana/sankalpa")
+async def set_sankalpa(data: SankalpaIn, user: dict = Depends(get_current_user)):
+    await db.sadhana_progress.update_one(
+        {"user_id": user["id"], "offering_id": data.offering_id},
+        {"$set": {"sankalpa": data.sankalpa, "started_at": now_utc().isoformat()},
+         "$setOnInsert": {"checkins": [], "streak": 0, "total_japa": 0}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api_router.post("/sadhana/checkin")
+async def checkin(data: SadhanaCheckinIn, user: dict = Depends(get_current_user)):
+    today = date.today().isoformat()
+    progress = await db.sadhana_progress.find_one({"user_id": user["id"], "offering_id": data.offering_id})
+    checkins = progress.get("checkins", []) if progress else []
+    already = any(c.get("date") == today for c in checkins)
+    if already:
+        return {"ok": True, "already_done": True}
+    # compassionate streak: if yesterday exists, increment; else reset to 1 (missed days show as fading)
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    prev_streak = progress.get("streak", 0) if progress else 0
+    new_streak = prev_streak + 1 if any(c.get("date") == yesterday for c in checkins) else 1
+    checkins.append({"date": today, "japa_count": data.japa_count, "notes": data.notes})
+    total_japa = sum(c.get("japa_count", 0) for c in checkins)
+    await db.sadhana_progress.update_one(
+        {"user_id": user["id"], "offering_id": data.offering_id},
+        {"$set": {"checkins": checkins, "streak": new_streak, "total_japa": total_japa,
+                  "last_checkin": today}},
+        upsert=True,
+    )
+    return {"ok": True, "streak": new_streak, "total_japa": total_japa}
+
+
+@api_router.get("/sadhana/{offering_id}")
+async def get_sadhana(offering_id: str, user: dict = Depends(get_current_user)):
+    p = await db.sadhana_progress.find_one({"user_id": user["id"], "offering_id": offering_id})
+    if not p:
+        return {"sankalpa": "", "checkins": [], "streak": 0, "total_japa": 0}
+    # cohort count
+    cohort_count = await db.sadhana_progress.count_documents({"offering_id": offering_id})
+    result = sanitize_doc(p)
+    result["cohort_count"] = cohort_count
+    return result
+
+
+# ==================== FREE CALCULATORS ====================
+NAKSHATRAS = ["Ashwini","Bharani","Krittika","Rohini","Mrigashira","Ardra","Punarvasu","Pushya",
+              "Ashlesha","Magha","Purva Phalguni","Uttara Phalguni","Hasta","Chitra","Swati","Vishakha",
+              "Anuradha","Jyeshtha","Mula","Purva Ashadha","Uttara Ashadha","Shravana","Dhanishta",
+              "Shatabhisha","Purva Bhadrapada","Uttara Bhadrapada","Revati"]
+
+TITHIS = ["Pratipada","Dwitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
+          "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Purnima/Amavasya"]
+
+YOGAS = ["Vishkambha","Priti","Ayushman","Saubhagya","Shobhana","Atiganda","Sukarma","Dhriti",
+         "Shula","Ganda","Vriddhi","Dhruva","Vyaghata","Harshana","Vajra","Siddhi","Vyatipata",
+         "Variyana","Parigha","Shiva","Siddha","Sadhya","Shubha","Shukla","Brahma","Indra","Vaidhriti"]
+
+KARANAS = ["Bava","Balava","Kaulava","Taitila","Gara","Vanija","Vishti","Shakuni","Chatushpada","Naga","Kimstughna"]
+
+RASHIS = ["Mesha","Vrishabha","Mithuna","Karka","Simha","Kanya","Tula","Vrishchika","Dhanu","Makara","Kumbha","Meena"]
+
+PLANETS = ["Sun","Moon","Mars","Mercury","Jupiter","Venus","Saturn","Rahu","Ketu"]
+
+
+@api_router.get("/calculators/panchang")
+async def calc_panchang(d: Optional[str] = None):
+    """Study-object panchang: no predictions, just computed elements."""
+    target = date.fromisoformat(d) if d else date.today()
+    seed = target.toordinal()
+    r = random.Random(seed)
+    return {
+        "date": target.isoformat(),
+        "tithi": TITHIS[seed % len(TITHIS)],
+        "paksha": "Shukla" if (seed % 30) < 15 else "Krishna",
+        "nakshatra": NAKSHATRAS[seed % len(NAKSHATRAS)],
+        "yoga": YOGAS[seed % len(YOGAS)],
+        "karana": KARANAS[seed % len(KARANAS)],
+        "vara": ["Ravivar","Somavar","Mangalvar","Budhavar","Guruvar","Shukravar","Shanivar"][target.weekday()],
+        "sunrise": "06:12",
+        "sunset": "18:34",
+        "moonrise": f"{(seed % 24):02d}:{(seed % 60):02d}",
+        "rahu_kalam": "07:30 – 09:00",
+        "note": "This is a study object. Learn to read a Panchang; the tradition does not predict — it observes."
+    }
+
+
+@api_router.post("/calculators/numerology")
+async def calc_numerology(payload: dict):
+    name = str(payload.get("name", "")).strip()
+    dob = payload.get("dob", "")
+    def reduce_digit(n):
+        while n > 9 and n not in (11, 22, 33):
+            n = sum(int(c) for c in str(n))
+        return n
+    def name_number(s):
+        vals = {c: ((ord(c) - 96) if c.isalpha() else 0) for c in s.lower()}
+        total = sum(vals.values())
+        return reduce_digit(total)
+    life_path = None
+    if dob:
+        try:
+            digits = "".join(c for c in dob if c.isdigit())
+            life_path = reduce_digit(sum(int(x) for x in digits))
+        except Exception:
+            pass
+    return {
+        "name": name,
+        "dob": dob,
+        "destiny_number": name_number(name) if name else None,
+        "life_path_number": life_path,
+        "note": "Numerology as śāstra: numbers are symbols of qualities. This is not a prediction of your future."
+    }
+
+
+@api_router.post("/calculators/kundli")
+async def calc_kundli(payload: dict):
+    name = str(payload.get("name", ""))
+    dob = payload.get("dob", "")
+    tob = payload.get("tob", "")
+    pob = payload.get("pob", "")
+    seed = hash(f"{name}{dob}{tob}{pob}") & 0xffffffff
+    r = random.Random(seed)
+    ascendant = RASHIS[r.randint(0, 11)]
+    houses = []
+    for i in range(12):
+        planets_in_house = r.sample(PLANETS, r.randint(0, 3))
+        houses.append({
+            "house": i + 1,
+            "sign": RASHIS[(RASHIS.index(ascendant) + i) % 12],
+            "planets": planets_in_house
+        })
+    return {
+        "name": name, "dob": dob, "tob": tob, "pob": pob,
+        "ascendant": ascendant,
+        "moon_sign": RASHIS[r.randint(0, 11)],
+        "sun_sign": RASHIS[r.randint(0, 11)],
+        "houses": houses,
+        "note": "Here is your chart as a study object. Learn to read it — we do not tell fortunes."
+    }
+
+
+@api_router.get("/calculators/transliterate")
+async def transliterate(text: str):
+    # Naive IAST -> Devanagari mapping (illustrative, MVP)
+    mapping = {"a":"अ","ā":"आ","i":"इ","ī":"ई","u":"उ","ū":"ऊ","e":"ए","ai":"ऐ","o":"ओ","au":"औ",
+               "ka":"क","kha":"ख","ga":"ग","gha":"घ","ca":"च","cha":"छ","ja":"ज","jha":"झ",
+               "ta":"त","tha":"थ","da":"द","dha":"ध","na":"न","pa":"प","pha":"फ","ba":"ब",
+               "bha":"भ","ma":"म","ya":"य","ra":"र","la":"ल","va":"व","sa":"स","ha":"ह",
+               "śa":"श","ṣa":"ष","ṃ":"ं","ḥ":"ः","om":"ॐ"}
+    out = text
+    for k, v in sorted(mapping.items(), key=lambda x: -len(x[0])):
+        out = out.replace(k, v)
+    return {"input": text, "devanagari": out,
+            "note": "Study tool. For rigorous transliteration, use the IAST word-by-word view in the Shloka Player."}
+
+
+# ==================== CONSULTATION ====================
+@api_router.post("/consultations")
+async def submit_consultation(data: ConsultationIn):
+    if not data.consent:
+        raise HTTPException(400, "Consent is required (DPDP)")
+    # find academic_staff with lightest open backlog
+    staff = await db.users.find({"role": "academic_staff"}).to_list(500)
+    if not staff:
+        # fallback to admin
+        staff = await db.users.find({"role": {"$in": ["admin", "super_admin"]}}).to_list(50)
+    if not staff:
+        raise HTTPException(503, "No staff available. Please try again later.")
+    counts = []
+    for s in staff:
+        n = await db.consultations.count_documents({"assigned_to": str(s["_id"]), "status": "open"})
+        counts.append((n, s))
+    counts.sort(key=lambda x: (x[0], str(x[1]["_id"])))
+    least = counts[0]
+    assigned_to = str(least[1]["_id"])
+    at_capacity = least[0] >= 10  # per-staff soft cap
+    doc = {
+        "name": data.name, "email": data.email.lower(), "phone": data.phone,
+        "interest": data.interest, "consent": True,
+        "assigned_to": assigned_to, "status": "open" if not at_capacity else "queued",
+        "created_at": now_utc().isoformat(),
+    }
+    result = await db.consultations.insert_one(doc)
+    expected = "24 hours" if not at_capacity else "48–72 hours (queued)"
+    return {"id": str(result.inserted_id), "assigned_to": assigned_to,
+            "expected_callback": expected, "status": doc["status"]}
+
+
+@api_router.get("/consultations/mine")
+async def my_consultations(user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    q = {} if user["role"] in ("admin", "super_admin") else {"assigned_to": user["id"]}
+    items = await db.consultations.find(q).sort("created_at", -1).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.patch("/consultations/{cid}")
+async def update_consultation(cid: str, data: dict,
+                               user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.consultations.update_one({"_id": ObjectId(cid)}, {"$set": data})
+    await write_audit(user, "consultation.update", cid, data)
+    return {"ok": True}
+
+
+# ==================== QUIZZES ====================
+@api_router.post("/quizzes")
+async def create_quiz(data: QuizIn,
+                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.quizzes.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return sanitize_doc(doc)
+
+
+@api_router.get("/quizzes/offering/{offering_id}")
+async def list_quizzes(offering_id: str):
+    items = await db.quizzes.find({"offering_id": offering_id}).to_list(50)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.get("/quizzes/{quiz_id}")
+async def get_quiz(quiz_id: str):
+    q = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
+    if not q:
+        raise HTTPException(404, "Quiz not found")
+    q = sanitize_doc(q)
+    # strip correct_index for learners
+    q["questions"] = [{"q": x["q"], "options": x["options"]} for x in q.get("questions", [])]
+    return q
+
+
+@api_router.post("/quizzes/attempts")
+async def submit_attempt(data: QuizAttemptIn, user: dict = Depends(get_current_user)):
+    q = await db.quizzes.find_one({"_id": ObjectId(data.quiz_id)})
+    if not q:
+        raise HTTPException(404, "Quiz not found")
+    questions = q.get("questions", [])
+    correct = 0
+    for i, ans in enumerate(data.answers):
+        if i < len(questions) and questions[i].get("correct_index") == ans:
+            correct += 1
+    score = round((correct / max(len(questions), 1)) * 100)
+    doc = {
+        "quiz_id": data.quiz_id, "user_id": user["id"], "answers": data.answers,
+        "score": score, "correct": correct, "total": len(questions),
+        "submitted_at": now_utc().isoformat(), "graded": True,
+    }
+    result = await db.quiz_attempts.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return sanitize_doc(doc)
+
+
+# ==================== DOUBTS Q&A ====================
+@api_router.post("/doubts")
+async def ask_doubt(data: DoubtIn, user: dict = Depends(get_current_user)):
+    doc = {
+        "offering_id": data.offering_id, "question": data.question,
+        "asked_by": user["id"], "asked_by_name": user.get("name", ""),
+        "answer": "", "answered_by": "", "status": "open",
+        "created_at": now_utc().isoformat(),
+    }
+    r = await db.doubts.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return sanitize_doc(doc)
+
+
+@api_router.get("/doubts/mine")
+async def my_doubts(user: dict = Depends(get_current_user)):
+    """Learner's own doubts — both open and answered."""
+    items = await db.doubts.find({"asked_by": user["id"]}).sort("created_at", -1).to_list(500)
+    result = []
+    for d in items:
+        d = sanitize_doc(d)
+        try:
+            o = await db.offerings.find_one({"_id": ObjectId(d["offering_id"])})
+            if o: d["offering_title"] = o.get("title", "")
+        except Exception:
+            pass
+        # Do not expose answerer's role to the learner — hide the "academic_staff" framing
+        d["answered_by_display"] = d.get("answered_by_name", "") or "Tredev Learn team"
+        result.append(d)
+    return result
+
+
+@api_router.get("/doubts")
+async def list_doubts(offering_id: Optional[str] = None, status: Optional[str] = None):
+    q = {}
+    if offering_id: q["offering_id"] = offering_id
+    if status: q["status"] = status
+    items = await db.doubts.find(q).sort("created_at", -1).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.post("/doubts/{did}/answer")
+async def answer_doubt(did: str, data: DoubtAnswerIn,
+                        user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.doubts.update_one({"_id": ObjectId(did)},
+        {"$set": {"answer": data.answer, "answered_by": user["id"],
+                  "answered_by_name": user.get("name", ""),
+                  "answered_at": now_utc().isoformat(), "status": "answered"}})
+    return {"ok": True}
+
+
+# ==================== CAPABILITY GRANTS ====================
+@api_router.get("/capabilities")
+async def list_capabilities(user: dict = Depends(require_role("admin", "super_admin", "academic_staff"))):
+    if user["role"] == "academic_staff":
+        items = await db.capability_grants.find({"staff_id": user["id"]}).to_list(200)
+    else:
+        items = await db.capability_grants.find({}).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.post("/capabilities")
+async def grant_capability(data: CapabilityGrantIn,
+                            actor: dict = Depends(require_role("admin", "super_admin"))):
+    doc = data.model_dump()
+    doc["granted_by"] = actor["id"]
+    doc["granted_at"] = now_utc().isoformat()
+    # upsert one grant per (staff, capability)
+    await db.capability_grants.update_one(
+        {"staff_id": data.staff_id, "capability": data.capability},
+        {"$set": doc}, upsert=True)
+    await write_audit(actor, "capability.grant", data.staff_id, {"cap": data.capability, "scope": data.scope})
+    return {"ok": True}
+
+
+@api_router.delete("/capabilities/{grant_id}")
+async def revoke_capability(grant_id: str,
+                             actor: dict = Depends(require_role("admin", "super_admin"))):
+    await db.capability_grants.delete_one({"_id": ObjectId(grant_id)})
+    await write_audit(actor, "capability.revoke", grant_id, {})
+    return {"ok": True}
+
+
+# ==================== LIVE SESSIONS (mocked PlugNmeet) ====================
+@api_router.get("/live-sessions/upcoming")
+async def upcoming_sessions(user: dict = Depends(get_current_user)):
+    now = now_utc()
+    items = await db.live_sessions.find({}).to_list(200)
+    result = []
+    for s in items:
+        s = sanitize_doc(s)
+        start = datetime.fromisoformat(s["starts_at"])
+        s["can_join"] = (start - now).total_seconds() <= 300  # 5 min before
+        s["is_live"] = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
+        result.append(s)
+    return sorted(result, key=lambda x: x["starts_at"])
+
+
+@api_router.post("/live-sessions/{sid}/join")
+async def join_session(sid: str, user: dict = Depends(get_current_user)):
+    s = await db.live_sessions.find_one({"_id": ObjectId(sid)})
+    if not s:
+        raise HTTPException(404, "Session not found")
+    # Use the real meeting link if staff provided one; otherwise a mock placeholder.
+    real = (s.get("join_url") or "").strip()
+    if real:
+        return {"join_url": real, "session": sanitize_doc(s)}
+    return {
+        "join_url": f"https://plugnmeet.example.com/room/{sid}?token=mock_{secrets.token_hex(8)}",
+        "session": sanitize_doc(s),
+        "note": "No meeting link set — placeholder link for MVP.",
+    }
+
+
+# ==================== CERTIFICATES ====================
+@api_router.post("/certificates/issue")
+async def issue_certificate(payload: dict,
+                             actor: dict = Depends(require_role("admin", "super_admin", "academic_staff"))):
+    user_id = payload["user_id"]
+    offering_id = payload["offering_id"]
+    u = await db.users.find_one({"_id": ObjectId(user_id)})
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    if not u or not o:
+        raise HTTPException(404, "User or offering not found")
+    if not o.get("acharya_id"):
+        raise HTTPException(400, "This course has no assigned Ācharya to sign the certificate.")
+    a = await db.users.find_one({"_id": ObjectId(o["acharya_id"])})
+    code = f"TDL-{secrets.token_hex(4).upper()}-{now_utc().year}"
+    doc = {
+        "code": code, "user_id": user_id, "user_name": u.get("name", ""),
+        "offering_id": offering_id, "offering_title": o.get("title", ""),
+        "issued_at": now_utc().isoformat(), "revoked": False,
+        # Routed to the course's Ācharya, awaiting their signature.
+        "acharya_id": o.get("acharya_id"),
+        "acharya_name": a.get("name", "") if a else "",
+        "signature_status": "pending_signature",
+        "signature_name": "", "signed_at": None,
+    }
+    r = await db.certificates.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "certificate.issue", code, {"user": user_id, "offering": offering_id})
+    return sanitize_doc(doc)
+
+
+@api_router.get("/certificates/mine")
+async def my_certificates(user: dict = Depends(get_current_user)):
+    """A learner only sees certificates that have completed the full sign-off pipeline."""
+    items = await db.certificates.find({"user_id": user["id"]}).to_list(200)
+    return [sanitize_doc(x) for x in items
+            if (x.get("signature_status") or "published") == "published"]
+
+
+@api_router.get("/certificates/verify/{code}")
+async def verify_certificate(code: str):
+    """Public - no auth required."""
+    c = await db.certificates.find_one({"code": code})
+    if not c:
+        return {"valid": False, "revoked": False, "message": "Certificate not found"}
+    c = sanitize_doc(c)
+    if c.get("revoked"):
+        return {"valid": False, "revoked": True, "certificate": c,
+                "message": "This certificate has been revoked."}
+    if (c.get("signature_status") or "published") != "published":
+        return {"valid": False, "revoked": False, "certificate": c,
+                "message": "This certificate has not been finalised yet."}
+    return {"valid": True, "revoked": False, "certificate": c}
+
+
+@api_router.post("/certificates/{code}/revoke")
+async def revoke_certificate(code: str,
+                              actor: dict = Depends(require_role("super_admin"))):
+    """Only super_admin can revoke (irreversible)."""
+    await db.certificates.update_one({"code": code},
+        {"$set": {"revoked": True, "revoked_at": now_utc().isoformat(), "revoked_by": actor["id"]}})
+    await write_audit(actor, "certificate.revoke", code, {})
+    return {"ok": True}
+
+
+# ---- Certificate signing pipeline: staff issue -> acharya sign -> staff publish -> learner ----
+@api_router.get("/certificates/pending-signature")
+async def certificates_pending_signature(actor: dict = Depends(require_role("acharya"))):
+    """Certificates routed to this Ācharya, awaiting their signature."""
+    items = await db.certificates.find(
+        {"acharya_id": actor["id"], "signature_status": "pending_signature"}).to_list(500)
+    return [sanitize_doc(c) for c in items]
+
+
+@api_router.post("/certificates/{code}/sign")
+async def sign_certificate(code: str, data: CertificateSignIn,
+                           actor: dict = Depends(require_role("acharya"))):
+    c = await db.certificates.find_one({"code": code})
+    if not c:
+        raise HTTPException(404, "Certificate not found")
+    if c.get("acharya_id") != actor["id"]:
+        raise HTTPException(403, "This certificate is not routed to you.")
+    if c.get("signature_status") != "pending_signature":
+        raise HTTPException(400, "This certificate is not awaiting your signature.")
+    name = (data.signature_name or actor.get("name", "")).strip()
+    # Signing finalises the certificate — it is now published to all portals.
+    await db.certificates.update_one({"code": code}, {"$set": {
+        "signature_status": "published", "signed_at": now_utc().isoformat(),
+        "signature_name": name, "acharya_name": name,
+    }})
+    await write_audit(actor, "certificate.sign", code, {"signature_name": name})
+    return {"ok": True}
+
+
+# ---- Learner requests → staff approves → routes to Ācharya to sign (= published) ----
+@api_router.post("/certificates/request")
+async def request_certificate(payload: dict, user: dict = Depends(get_current_user)):
+    offering_id = payload.get("offering_id")
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)}) if offering_id else None
+    if not o:
+        raise HTTPException(404, "Course not found")
+    e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
+    if not e:
+        raise HTTPException(400, "You are not enrolled in this course.")
+    total = len(o.get("modules") or [])
+    done = len(e.get("completed_lessons") or [])
+    if not total or done < total:
+        raise HTTPException(400, "Complete all lessons before requesting a certificate.")
+    if not o.get("acharya_id"):
+        raise HTTPException(400, "This course has no assigned Ācharya.")
+    # No duplicate active certificate/request for the same course.
+    existing = await db.certificates.find({"user_id": user["id"], "offering_id": offering_id}).to_list(50)
+    if any(not x.get("revoked") for x in existing):
+        raise HTTPException(400, "A certificate for this course already exists or is in progress.")
+    code = f"TDL-{secrets.token_hex(4).upper()}-{now_utc().year}"
+    a = await db.users.find_one({"_id": ObjectId(o["acharya_id"])})
+    doc = {
+        "code": code, "user_id": user["id"], "user_name": user.get("name", ""),
+        "offering_id": offering_id, "offering_title": o.get("title", ""),
+        "issued_at": now_utc().isoformat(), "revoked": False,
+        "acharya_id": o.get("acharya_id"), "acharya_name": a.get("name", "") if a else "",
+        "signature_status": "requested", "signature_name": "", "signed_at": None,
+    }
+    r = await db.certificates.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(user, "certificate.request", code, {"offering": offering_id})
+    return sanitize_doc(doc)
+
+
+@api_router.get("/certificates/requests")
+async def certificate_requests(actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Learner-submitted certificate requests awaiting staff approval."""
+    items = await db.certificates.find({"signature_status": "requested"}).sort("issued_at", -1).to_list(500)
+    return [sanitize_doc(c) for c in items]
+
+
+@api_router.post("/certificates/{code}/approve-request")
+async def approve_certificate_request(code: str,
+                                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    c = await db.certificates.find_one({"code": code})
+    if not c:
+        raise HTTPException(404, "Certificate not found")
+    if c.get("signature_status") != "requested":
+        raise HTTPException(400, "This is not a pending request.")
+    if not c.get("acharya_id"):
+        raise HTTPException(400, "No Ācharya routed for this certificate.")
+    await db.certificates.update_one({"code": code}, {"$set": {
+        "signature_status": "pending_signature",
+        "staff_approved_at": now_utc().isoformat(), "staff_approved_by": actor["id"],
+    }})
+    await write_audit(actor, "certificate.approve_request", code, {})
+    return {"ok": True}
+
+
+@api_router.get("/certificates/mine-all")
+async def my_certificates_all(user: dict = Depends(get_current_user)):
+    """All of the learner's certificates in any state (for showing request status)."""
+    items = await db.certificates.find({"user_id": user["id"]}).to_list(200)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.get("/certificates/pending-approval")
+async def certificates_pending_approval(actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Retained for compatibility — signing now finalises directly, so this is usually empty."""
+    items = await db.certificates.find({"signature_status": "signed"}).sort("signed_at", -1).to_list(500)
+    return [sanitize_doc(c) for c in items]
+
+
+@api_router.post("/certificates/{code}/publish")
+async def publish_certificate(code: str,
+                              actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    c = await db.certificates.find_one({"code": code})
+    if not c:
+        raise HTTPException(404, "Certificate not found")
+    if c.get("signature_status") != "signed":
+        raise HTTPException(400, "Only a signed certificate can be published.")
+    await db.certificates.update_one({"code": code}, {"$set": {
+        "signature_status": "published",
+        "staff_approved_at": now_utc().isoformat(), "staff_approved_by": actor["id"],
+    }})
+    await write_audit(actor, "certificate.publish", code, {})
+    return {"ok": True}
+
+
+# ==================== COMMUNITY ====================
+@api_router.get("/community/posts")
+async def list_posts():
+    posts = await db.community_posts.find({}).sort("created_at", -1).limit(100).to_list(100)
+    return [sanitize_doc(p) for p in posts]
+
+
+@api_router.post("/community/posts")
+async def create_post(data: CommunityPostIn, user: dict = Depends(get_current_user)):
+    doc = {
+        "body": data.body, "verse_id": data.verse_id or "",
+        "author_id": user["id"], "author_name": user.get("name", ""),
+        "created_at": now_utc().isoformat(), "flagged": False,
+    }
+    r = await db.community_posts.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return sanitize_doc(doc)
+
+
+# ==================== AUDIT LOG ====================
+@api_router.get("/audit-log")
+async def get_audit(user: dict = Depends(require_role("admin", "super_admin"))):
+    items = await db.audit_log.find({}).sort("created_at", -1).limit(500).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+# ==================== PAYMENTS (mocked Razorpay) ====================
+@api_router.post("/payments/create-order")
+async def create_order(payload: dict, user: dict = Depends(get_current_user)):
+    """MOCKED Razorpay order creation."""
+    offering_id = payload["offering_id"]
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    if not o:
+        raise HTTPException(404, "Offering not found")
+    order_id = f"order_mock_{secrets.token_hex(8)}"
+    doc = {
+        "order_id": order_id, "user_id": user["id"], "offering_id": offering_id,
+        "amount_inr": o.get("price_inr", 0), "status": "created",
+        "created_at": now_utc().isoformat(), "mocked": True,
+    }
+    await db.payments.insert_one(doc)
+    return {"order_id": order_id, "amount": o.get("price_inr", 0), "mocked": True,
+            "note": "MOCKED Razorpay — no real payment collected."}
+
+
+@api_router.post("/payments/webhook-mock")
+async def payment_webhook_mock(payload: dict):
+    """MOCKED payment success webhook. In production, verify Razorpay signature."""
+    order_id = payload["order_id"]
+    p = await db.payments.find_one({"order_id": order_id})
+    if not p:
+        raise HTTPException(404, "Order not found")
+    await db.payments.update_one({"order_id": order_id},
+        {"$set": {"status": "paid", "paid_at": now_utc().isoformat()}})
+    # auto-enroll user
+    existing = await db.enrollments.find_one({"user_id": p["user_id"], "offering_id": p["offering_id"]})
+    if not existing:
+        await db.enrollments.insert_one({
+            "user_id": p["user_id"], "offering_id": p["offering_id"],
+            "enrolled_at": now_utc().isoformat(), "progress": 0,
+            "completed_lessons": [], "status": "active",
+        })
+    return {"ok": True}
+
+
+# ==================== FESTIVAL CALENDAR ====================
+@api_router.get("/festivals")
+async def list_festivals():
+    """Auto-computed Vedic festival calendar (tithi-based, Swiss Ephemeris).
+    Returns the next occurrences from today so dates advance every year."""
+    try:
+        return panchang.upcoming_festivals(count=12)
+    except Exception as e:
+        logger.warning(f"Panchang computation failed, falling back to stored festivals: {e}")
+        items = await db.festivals.find({}).to_list(100)
+        return [sanitize_doc(f) for f in items]
+
+
+# ==================== MANTRAS (by deity, linked to the festival calendar) ====================
+@api_router.get("/mantras")
+async def list_mantras(deity: Optional[str] = None):
+    q = {}
+    if deity:
+        q["deity"] = deity
+    items = await db.mantras.find(q).sort("created_at", -1).to_list(500)
+    return [sanitize_doc(m) for m in items]
+
+
+@api_router.post("/mantras")
+async def create_mantra(data: MantraIn,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.mantras.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "mantra.create", str(r.inserted_id), {"deity": data.deity, "title": data.title})
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/mantras/{mid}")
+async def update_mantra(mid: str, data: dict,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    data.pop("id", None); data.pop("_id", None)
+    if data:
+        await db.mantras.update_one({"_id": ObjectId(mid)}, {"$set": data})
+    await write_audit(actor, "mantra.update", mid, data)
+    m = await db.mantras.find_one({"_id": ObjectId(mid)})
+    return sanitize_doc(m)
+
+
+@api_router.delete("/mantras/{mid}")
+async def delete_mantra(mid: str,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.mantras.delete_one({"_id": ObjectId(mid)})
+    await write_audit(actor, "mantra.delete", mid, {})
+    return {"ok": True}
+
+
+# ==================== BLOGS / JOURNAL ====================
+@api_router.get("/blogs")
+async def list_blogs(category: Optional[str] = None, limit: int = 50):
+    q = {}
+    if category:
+        q["category"] = category
+    items = await db.blogs.find(q).sort("created_at", -1).limit(limit).to_list(limit)
+    return [sanitize_doc(b) for b in items]
+
+
+@api_router.get("/blogs/{slug}")
+async def get_blog(slug: str):
+    b = await db.blogs.find_one({"slug": slug})
+    if not b:
+        raise HTTPException(404, "Blog not found")
+    return sanitize_doc(b)
+
+
+# ==================== WEBINARS ====================
+@api_router.get("/webinars")
+async def list_webinars(upcoming_only: bool = True):
+    items = await db.webinars.find({}).sort("starts_at", 1).to_list(100)
+    now = now_utc()
+    result = []
+    for w in items:
+        w = sanitize_doc(w)
+        try:
+            start = datetime.fromisoformat(w["starts_at"])
+        except Exception:
+            continue
+        if upcoming_only and start < now - timedelta(hours=2):
+            continue
+        w["starts_in_seconds"] = int((start - now).total_seconds())
+        w["is_live"] = 0 <= (now - start).total_seconds() <= 90 * 60
+        result.append(w)
+    return result
+
+
+# ==================== MENTORS ====================
+@api_router.get("/mentors")
+async def list_mentors():
+    """Public mentor showcase — expanded acharya profiles."""
+    items = await db.mentors.find({}).sort("order", 1).to_list(50)
+    return [sanitize_doc(m) for m in items]
+
+
+# ==================== TESTIMONIALS ====================
+@api_router.get("/testimonials")
+async def list_testimonials():
+    items = await db.testimonials.find({}).to_list(100)
+    return [sanitize_doc(t) for t in items]
+
+
+# ==================== SITE STATS ====================
+@api_router.get("/stats")
+async def site_stats():
+    learners = await db.users.count_documents({"role": "learner"})
+    paths = await db.offerings.count_documents({"is_published": True})
+    mentors = await db.mentors.count_documents({})
+    verses = await db.verses.count_documents({})
+    # Public marketing stats — blended (real + baseline). Baseline reflects legacy tradition.
+    return {
+        "learners_display": max(learners + 620000, 620000),
+        "paths_display": max(paths + 60, 60),
+        "google_rating": 4.8,
+        "mentors_display": max(mentors, 30),
+        "years_of_legacy": 51,
+        "verses_indexed": max(verses, 5),
+        "certificates_issued": await db.certificates.count_documents({"revoked": {"$ne": True}}),
+    }
+
+
+# ==================== FREE TOOLS: TAROT & RAM SHALAKA ====================
+TAROT_DECK = [
+    {"name":"The Fool","meaning":"New beginnings, spontaneity, faith"},
+    {"name":"The Magician","meaning":"Willpower, manifestation, resourcefulness"},
+    {"name":"The High Priestess","meaning":"Intuition, sacred knowledge, the unconscious"},
+    {"name":"The Empress","meaning":"Fertility, nurture, abundance"},
+    {"name":"The Emperor","meaning":"Structure, authority, order"},
+    {"name":"The Hierophant","meaning":"Tradition, teaching, spiritual wisdom"},
+    {"name":"The Lovers","meaning":"Union, alignment, choice"},
+    {"name":"The Chariot","meaning":"Willpower, control, direction"},
+    {"name":"Strength","meaning":"Inner courage, compassion, patience"},
+    {"name":"The Hermit","meaning":"Solitude, introspection, guidance"},
+    {"name":"Wheel of Fortune","meaning":"Cycles, destiny, change"},
+    {"name":"Justice","meaning":"Fairness, truth, cause and effect"},
+    {"name":"The Hanged Man","meaning":"Surrender, new perspective, pause"},
+    {"name":"Death","meaning":"Endings, transformation, transition"},
+    {"name":"Temperance","meaning":"Balance, moderation, patience"},
+    {"name":"The Tower","meaning":"Sudden change, upheaval, awakening"},
+    {"name":"The Star","meaning":"Hope, inspiration, renewal"},
+    {"name":"The Moon","meaning":"Illusion, dreams, the subconscious"},
+    {"name":"The Sun","meaning":"Joy, vitality, clarity"},
+    {"name":"Judgement","meaning":"Reckoning, absolution, calling"},
+    {"name":"The World","meaning":"Completion, fulfillment, wholeness"},
+]
+
+RAM_SHALAKA_ANSWERS = [
+    "The endeavour, undertaken with a pure intent, shall be accomplished in due time. Practise patience and continue with discipline.",
+    "The result at present is uncertain; wait, observe, and re-attempt after reflection. Do not act on impulse.",
+    "Success is close, but demands unwavering effort. Do not abandon the path at the final step.",
+    "There is delay owing to karma; steady practice and sincerity will remove the obstacle. Keep your saṅkalpa.",
+    "The auspicious moment favours you. Move ahead with quiet resolve — but never with pride.",
+    "Consult a wise elder or teacher before proceeding. This is not for solitary judgement.",
+    "The desired result shall arrive, but not in the form you imagine. Remain open.",
+    "This is not the time. Withdraw, wait, and let the mind settle. Return when the season is right.",
+    "The task will meet with success by the grace of the tradition. Offer gratitude, not conditions.",
+]
+
+
+@api_router.post("/calculators/tarot")
+async def calc_tarot(payload: dict):
+    """3-card tarot spread — Past, Present, Future. Framed as a study tool for symbolic reflection."""
+    question = str(payload.get("question", "")).strip()
+    # deterministic per question so users see stable result on same query
+    seed = (hash(question) if question else int(datetime.now(timezone.utc).timestamp())) & 0xffffffff
+    r = random.Random(seed)
+    indices = r.sample(range(len(TAROT_DECK)), 3)
+    labels = ["Past", "Present", "Future"]
+    spread = []
+    for i, idx in enumerate(indices):
+        card = TAROT_DECK[idx]
+        reversed_ = r.random() < 0.25
+        spread.append({
+            "position": labels[i], "name": card["name"],
+            "meaning": card["meaning"], "reversed": reversed_,
+        })
+    return {
+        "question": question, "spread": spread,
+        "note": "Tarot as symbolic reflection — a mirror for the mind, not a prophecy. Draw meaning, not certainty."
+    }
+
+
+@api_router.post("/calculators/ram-shalaka")
+async def calc_ram_shalaka(payload: dict):
+    """Śrī Rāma Śalākā prashna — 9-cell grid answer. Framed as reflective divination, not fortune-telling."""
+    question = str(payload.get("question", "")).strip()
+    if not question:
+        raise HTTPException(400, "A question is required")
+    seed = hash(question) & 0xffffffff
+    r = random.Random(seed)
+    idx = r.randint(0, len(RAM_SHALAKA_ANSWERS) - 1)
+    return {
+        "question": question,
+        "answer": RAM_SHALAKA_ANSWERS[idx],
+        "note": "The Rāma Śalākā tradition offers reflective counsel — a mirror for your own clarity. Read it as a study of intent, not a promise of outcome."
+    }
+
+
+# ==================== ĀCHARYA CONTENT SUBMISSIONS ====================
+@api_router.post("/acharya/content")
+async def create_acharya_content(data: AcharyaContentIn,
+                                  actor: dict = Depends(require_role("acharya"))):
+    doc = data.model_dump()
+    doc["acharya_id"] = actor["id"]
+    doc["acharya_name"] = actor.get("name", "")
+    doc["status"] = "pending_review"
+    doc["review_notes"] = ""
+    doc["created_at"] = now_utc().isoformat()
+    r = await db.acharya_content.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "acharya_content.submit", str(r.inserted_id), {"title": data.title})
+    return sanitize_doc(doc)
+
+
+@api_router.get("/acharya/content")
+async def list_acharya_content(user: dict = Depends(get_current_user)):
+    """Acharya sees own submissions; staff/admin sees all pending."""
+    if user["role"] == "acharya":
+        q = {"acharya_id": user["id"]}
+    elif user["role"] in ("academic_staff", "admin", "super_admin"):
+        q = {}
+    else:
+        raise HTTPException(403, "Forbidden")
+    items = await db.acharya_content.find(q).sort("created_at", -1).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.post("/acharya/content/{cid}/review")
+async def review_acharya_content(cid: str, data: AcharyaContentReviewIn,
+                                  actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.acharya_content.update_one({"_id": ObjectId(cid)},
+        {"$set": {"status": "approved" if data.approved else "changes_requested",
+                  "review_notes": data.notes,
+                  "reviewed_by": actor["id"],
+                  "reviewed_by_name": actor.get("name", ""),
+                  "reviewed_at": now_utc().isoformat()}})
+    await write_audit(actor, "acharya_content.review", cid,
+                       {"approved": data.approved, "notes": data.notes})
+    return {"ok": True}
+
+
+# ==================== LIVE SESSIONS — CREATE (staff schedules for acharyas) ====================
+@api_router.post("/live-sessions")
+async def create_live_session(data: LiveSessionCreateIn,
+                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    a = await db.users.find_one({"_id": ObjectId(data.acharya_id)}) if data.acharya_id else None
+    doc = data.model_dump()
+    doc["offering_id"] = (doc.get("offering_id") or "").strip() or None  # standalone if blank
+    doc["acharya_name"] = a.get("name", "") if a else ""
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.live_sessions.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "live_session.create", str(r.inserted_id), {"title": data.title, "acharya": data.acharya_id})
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/live-sessions/{sid}")
+async def update_live_session(sid: str, data: LiveSessionUpdateIn,
+                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    s = await db.live_sessions.find_one({"_id": ObjectId(sid)})
+    if not s:
+        raise HTTPException(404, "Session not found")
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "offering_id" in update:
+        update["offering_id"] = (update["offering_id"] or "").strip() or None
+    if "acharya_id" in update:
+        a = await db.users.find_one({"_id": ObjectId(update["acharya_id"])}) if update["acharya_id"] else None
+        update["acharya_name"] = a.get("name", "") if a else ""
+    if update:
+        await db.live_sessions.update_one({"_id": ObjectId(sid)}, {"$set": update})
+    await write_audit(actor, "live_session.update", sid, update)
+    s = await db.live_sessions.find_one({"_id": ObjectId(sid)})
+    return sanitize_doc(s)
+
+
+@api_router.delete("/live-sessions/{sid}")
+async def delete_live_session(sid: str,
+                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.live_sessions.delete_one({"_id": ObjectId(sid)})
+    await write_audit(actor, "live_session.delete", sid, {})
+    return {"ok": True}
+
+
+@api_router.get("/live-sessions")
+async def list_live_sessions(acharya_id: Optional[str] = None,
+                              offering_id: Optional[str] = None):
+    q = {}
+    if acharya_id: q["acharya_id"] = acharya_id
+    if offering_id: q["offering_id"] = offering_id
+    items = await db.live_sessions.find(q).sort("starts_at", 1).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.get("/live-sessions/mine-acharya")
+async def acharya_live_sessions(user: dict = Depends(require_role("acharya"))):
+    """Sessions scheduled under this Ācharya's name — for their join view."""
+    now = now_utc()
+    items = await db.live_sessions.find({"acharya_id": user["id"]}).sort("starts_at", 1).to_list(500)
+    result = []
+    for s in items:
+        s = sanitize_doc(s)
+        try:
+            start = datetime.fromisoformat(s["starts_at"])
+            s["can_join"] = (start - now).total_seconds() <= 300
+            s["is_live"] = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
+        except Exception:
+            s["can_join"] = False; s["is_live"] = False
+        try:
+            o = await db.offerings.find_one({"_id": ObjectId(s.get("offering_id",""))})
+            if o: s["offering_title"] = o.get("title", "")
+        except Exception:
+            pass
+        result.append(s)
+    return result
+
+
+@api_router.get("/live-sessions/mine-learner")
+async def learner_live_sessions(user: dict = Depends(get_current_user)):
+    """Sessions for the courses this learner is enrolled in."""
+    now = now_utc()
+    enrollments = await db.enrollments.find({"user_id": user["id"]}).to_list(500)
+    enrolled_ids = [e.get("offering_id") for e in enrollments if e.get("offering_id")]
+    if not enrolled_ids:
+        return []
+    items = await db.live_sessions.find(
+        {"offering_id": {"$in": enrolled_ids}}).sort("starts_at", 1).to_list(500)
+    result = []
+    for s in items:
+        s = sanitize_doc(s)
+        try:
+            start = datetime.fromisoformat(s["starts_at"])
+            s["can_join"] = (start - now).total_seconds() <= 300
+            s["is_live"] = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
+        except Exception:
+            s["can_join"] = False; s["is_live"] = False
+        try:
+            o = await db.offerings.find_one({"_id": ObjectId(s.get("offering_id",""))})
+            if o: s["offering_title"] = o.get("title", "")
+        except Exception:
+            pass
+        result.append(s)
+    return result
+
+
+# ==================== WEBINARS — CREATE (staff) ====================
+@api_router.post("/webinars")
+async def create_webinar(data: WebinarCreateIn,
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.webinars.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "webinar.create", str(r.inserted_id), {"title": data.title})
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/webinars/{wid}")
+async def update_webinar(wid: str, data: dict,
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    data.pop("id", None); data.pop("_id", None)
+    if data:
+        await db.webinars.update_one({"_id": ObjectId(wid)}, {"$set": data})
+    await write_audit(actor, "webinar.update", wid, data)
+    w = await db.webinars.find_one({"_id": ObjectId(wid)})
+    return sanitize_doc(w)
+
+
+@api_router.delete("/webinars/{wid}")
+async def delete_webinar(wid: str,
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.webinars.delete_one({"_id": ObjectId(wid)})
+    await write_audit(actor, "webinar.delete", wid, {})
+    return {"ok": True}
+
+
+@api_router.get("/webinars/my-registrations")
+async def my_webinar_registrations(user: dict = Depends(get_current_user)):
+    """Ids of webinars the current learner has registered for."""
+    items = await db.webinars.find({}).to_list(1000)
+    return [str(w["_id"]) for w in items if user["id"] in (w.get("registered_user_ids") or [])]
+
+
+@api_router.post("/webinars/{wid}/register")
+async def register_webinar(wid: str, user: dict = Depends(get_current_user)):
+    """MOCKED registration + payment — returns a payment id and the webinar details."""
+    w = await db.webinars.find_one({"_id": ObjectId(wid)})
+    if not w:
+        raise HTTPException(404, "Webinar not found")
+    seats = int(w.get("seats_remaining", 0) or 0)
+    if seats <= 0:
+        raise HTTPException(400, "This webinar is sold out.")
+    reg = list(w.get("registered_user_ids") or [])
+    if user["id"] in reg:
+        raise HTTPException(400, "You are already registered for this webinar.")
+    payment_id = f"PAY-{secrets.token_hex(6).upper()}"
+    reg.append(user["id"])
+    await db.webinars.update_one({"_id": ObjectId(wid)},
+        {"$set": {"seats_remaining": seats - 1, "registered_user_ids": reg}})
+    w = sanitize_doc(await db.webinars.find_one({"_id": ObjectId(wid)}))
+    await write_audit(user, "webinar.register", wid, {"payment_id": payment_id})
+    return {
+        "ok": True, "payment_id": payment_id, "webinar": w,
+        "join_url": (w.get("join_url") or "").strip(),
+        "note": "MOCKED payment — Razorpay not yet configured.",
+    }
+
+
+# ==================== CERTIFICATES — grouped view + issue by staff ====================
+@api_router.get("/certificates/all-grouped")
+async def all_certificates_grouped(user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Platform-wide certificates grouped by user (then by course)."""
+    certs = await db.certificates.find({}).sort("issued_at", -1).to_list(2000)
+    groups = {}
+    for c in certs:
+        c = sanitize_doc(c)
+        uid = c.get("user_id", "unknown")
+        if uid not in groups:
+            groups[uid] = {"user_id": uid, "user_name": c.get("user_name", ""), "certificates": []}
+        groups[uid]["certificates"].append(c)
+    return list(groups.values())
+
+
+@api_router.get("/certificates/signed-by-me")
+async def certificates_signed_by_me(user: dict = Depends(require_role("acharya"))):
+    """Certificates this Ācharya has personally signed (signed or published)."""
+    certs = await db.certificates.find(
+        {"acharya_id": user["id"], "signature_status": {"$in": ["signed", "published"]}}
+    ).sort("signed_at", -1).to_list(1000)
+    return [sanitize_doc(c) for c in certs]
+
+
+# ==================== STORAGE (recorded lesson video uploads) ====================
+def ensure_storage_bucket():
+    """Best-effort: create the public course-media bucket if storage is configured."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.info("Storage not configured — skipping bucket ensure (set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).")
+        return
+    try:
+        resp = requests.post(f"{SUPABASE_URL}/storage/v1/bucket", json={
+            "id": COURSE_MEDIA_BUCKET, "name": COURSE_MEDIA_BUCKET, "public": True,
+        }, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+        if resp.status_code < 300:
+            logger.info(f"Storage bucket '{COURSE_MEDIA_BUCKET}' created.")
+        elif "already exists" in resp.text.lower() or resp.status_code == 409:
+            logger.info(f"Storage bucket '{COURSE_MEDIA_BUCKET}' ready.")
+        else:
+            logger.warning(f"Bucket ensure returned {resp.status_code}: {resp.text[:160]}")
+    except Exception as e:
+        logger.warning(f"Bucket ensure failed: {e}")
+
+
+@api_router.post("/storage/sign-upload")
+async def sign_upload(data: SignUploadIn,
+                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Return a signed URL the browser can PUT a file to directly (service key stays server-side)."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(503, "Storage is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env).")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", (data.filename or "file").strip()) or "file"
+    path = f"lessons/{secrets.token_hex(8)}/{safe}"
+    endpoint = f"{SUPABASE_URL}/storage/v1/object/upload/sign/{COURSE_MEDIA_BUCKET}/{path}"
+    try:
+        resp = requests.post(endpoint, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+    except Exception as e:
+        raise HTTPException(502, f"Storage request failed: {e}")
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"Could not sign upload ({resp.status_code}): {resp.text[:200]}")
+    signed = resp.json().get("url", "")  # e.g. /object/upload/sign/course-media/<path>?token=...
+    upload_url = f"{SUPABASE_URL}/storage/v1{signed}"
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{COURSE_MEDIA_BUCKET}/{path}"
+    return {"upload_url": upload_url, "public_url": public_url, "path": path,
+            "content_type": data.content_type}
+
+
+# ==================== ROOT ====================
+@api_router.get("/")
+async def root():
+    return {"app": "Tredev Learn", "version": "2.0"}
+
+
+app.include_router(api_router)
+
+# NOTE: with allow_credentials=True the response must echo the specific request
+# origin — a literal "*" makes the browser reject credentialed responses
+# (axios uses withCredentials). allow_origin_regex=".*" echoes any origin, so it
+# stays "allow everything" while remaining credentials-compatible.
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origin_regex=".*",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ==================== SEED DATA ====================
+async def _seed_user(email, password, name, role, bio="", parampara=""):
+    """Ensure a Firebase identity + local profile row exist for a seed account."""
+    email = email.lower()
+    fb_uid = await firebase_auth.ensure_user(email, password, name)
+    existing = await db.users.find_one({"email": email})
+    if not existing:
+        await db.users.insert_one({
+            "firebase_uid": fb_uid, "email": email, "name": name, "role": role,
+            "created_at": now_utc().isoformat(), "bio": bio,
+            "parampara": parampara, "avatar_url": "",
+        })
+        logger.info(f"Seeded {role}: {email}")
+    else:
+        # Keep the firebase link (and role, for the env-driven admins) current.
+        await db.users.update_one({"email": email},
+            {"$set": {"firebase_uid": fb_uid, "role": role}})
+
+
+async def seed_admin_and_data():
+    # Admin / super-admin from env
+    admin_email = os.environ.get("ADMIN_EMAIL")
+    admin_pass = os.environ.get("ADMIN_PASSWORD")
+    if admin_email and admin_pass:
+        await _seed_user(admin_email, admin_pass, "Platform Admin", "admin")
+
+    super_email = os.environ.get("SUPER_ADMIN_EMAIL")
+    super_pass = os.environ.get("SUPER_ADMIN_PASSWORD")
+    if super_email and super_pass:
+        await _seed_user(super_email, super_pass, "Super Admin", "super_admin")
+
+    # Test accounts (idempotent)
+    learner_email = "learner@tredevlearn.com"
+    await _seed_user(learner_email, "Learner@123", "Priya Sharma", "learner")
+
+    acharya_email = "acharya@tredevlearn.com"
+    await _seed_user(
+        acharya_email, "Acharya@123", "Ācharya Vishwanath Shastri", "acharya",
+        bio="Fourth-generation Vedic scholar specializing in Advaita Vedanta.",
+        parampara="Sringeri Sharada Peetham lineage")
+
+    staff_email = "staff@tredevlearn.com"
+    await _seed_user(staff_email, "Staff@123", "Ananya Iyer", "academic_staff",
+                     bio="PhD, Sanskrit Grammar")
+
+    acharya = await db.users.find_one({"email": acharya_email})
+    acharya_id = str(acharya["_id"]) if acharya else ""
+
+    # Seed verses if none
+    if await db.verses.count_documents({}) == 0:
+        verses = [
+            {
+                "scripture": "Bhagavad Gita", "reference": "2.47",
+                "devanagari": "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
+                "iast": "karmaṇy-evādhikāras te mā phaleṣu kadācana |\nmā karma-phala-hetur bhūr mā te saṅgo 'stv akarmaṇi ||",
+                "word_by_word": [
+                    {"sanskrit":"कर्मणि","iast":"karmaṇi","meaning":"in action"},
+                    {"sanskrit":"एव","iast":"eva","meaning":"only"},
+                    {"sanskrit":"अधिकारः","iast":"adhikāraḥ","meaning":"right, entitlement"},
+                    {"sanskrit":"ते","iast":"te","meaning":"your"},
+                    {"sanskrit":"मा","iast":"mā","meaning":"never"},
+                    {"sanskrit":"फलेषु","iast":"phaleṣu","meaning":"in the fruits"},
+                    {"sanskrit":"कदाचन","iast":"kadācana","meaning":"at any time"},
+                ],
+                "translations": [
+                    {"author":"Śrī Śaṅkarācārya","text":"Your right is to action alone, never to its fruits. Let not the fruits of action be your motive, nor let your attachment be to inaction."},
+                    {"author":"Swami Chinmayananda","text":"Your right is to work only, but never to its fruits. Let not the fruits of action be thy motive, nor let thy attachment be to inaction."},
+                    {"author":"Sri Aurobindo","text":"Thou hast a right to action, but only to action, never to its fruits; let not the fruits of thy works be thy motive, neither let there be in thee any attachment to inactivity."},
+                ],
+                "commentaries": [
+                    {"author":"Śaṅkara","text":"The verse establishes karma-yoga — action performed without attachment to results as a discipline of the mind."},
+                    {"author":"Rāmānuja","text":"The Lord addresses the seeker with a niṣkāma-karma injunction, purifying antaḥkaraṇa before jñāna."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Bhagavad Gita", "reference": "2.20",
+                "devanagari": "न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः।\nअजो नित्यः शाश्वतोऽयं पुराणो\nन हन्यते हन्यमाने शरीरे॥",
+                "iast": "na jāyate mriyate vā kadācin\nnāyaṃ bhūtvā bhavitā vā na bhūyaḥ |\najo nityaḥ śāśvato 'yaṃ purāṇo\nna hanyate hanyamāne śarīre ||",
+                "word_by_word": [
+                    {"sanskrit":"न","iast":"na","meaning":"not"},
+                    {"sanskrit":"जायते","iast":"jāyate","meaning":"is born"},
+                    {"sanskrit":"म्रियते","iast":"mriyate","meaning":"dies"},
+                    {"sanskrit":"अजः","iast":"ajaḥ","meaning":"unborn"},
+                    {"sanskrit":"नित्यः","iast":"nityaḥ","meaning":"eternal"},
+                ],
+                "translations": [
+                    {"author":"Śaṅkara","text":"The Self is never born, nor does it ever die; it has not come to be, nor will it cease to be. Unborn, eternal, permanent and ancient, it is not slain when the body is slain."},
+                    {"author":"S. Radhakrishnan","text":"He is never born, nor does he ever die; nor having come to be, will he ever cease to be. Unborn, eternal, everlasting, ancient, he is not slain when the body is slain."},
+                ],
+                "commentaries": [
+                    {"author":"Śaṅkara","text":"The ātman transcends the six modifications of being (ṣaḍ-vikārā): birth, existence, growth, transformation, decay, death."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Isha Upanishad", "reference": "1",
+                "devanagari": "ईशावास्यमिदꣳ सर्वं यत्किञ्च जगत्यां जगत्।\nतेन त्यक्तेन भुञ्जीथा मा गृधः कस्यस्विद्धनम्॥",
+                "iast": "īśāvāsyam idaṃ sarvaṃ yat kiñca jagatyāṃ jagat |\ntena tyaktena bhuñjīthā mā gṛdhaḥ kasyasvid dhanam ||",
+                "word_by_word": [
+                    {"sanskrit":"ईशा","iast":"īśā","meaning":"by the Lord"},
+                    {"sanskrit":"आवास्यम्","iast":"āvāsyam","meaning":"pervaded, indwelt"},
+                    {"sanskrit":"सर्वम्","iast":"sarvam","meaning":"all"},
+                ],
+                "translations": [
+                    {"author":"Śaṅkara","text":"All this — whatever moves in this moving world — is indwelt by the Lord. Enjoy through renunciation; do not covet anyone's wealth."},
+                    {"author":"Sri Aurobindo","text":"All this is for habitation by the Lord, whatsoever is individual universe of movement in the universal motion."},
+                ],
+                "commentaries": [
+                    {"author":"Śaṅkara","text":"The famous opening of the Iśopaniṣad — non-attachment (tyāga) as the means to true enjoyment (bhoga)."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Rigveda", "reference": "10.129.1 (Nāsadīya Sūkta)",
+                "devanagari": "नासदासीन्नो सदासीत्तदानीं नासीद्रजो नो व्योमा परो यत्।\nकिमावरीवः कुह कस्य शर्मन्नम्भः किमासीद्गहनं गभीरम्॥",
+                "iast": "nāsad āsīn no sad āsīt tadānīṃ nāsīd rajo no vyomā paro yat |\nkim āvarīvaḥ kuha kasya śarmann ambhaḥ kim āsīd gahanaṃ gabhīram ||",
+                "word_by_word": [
+                    {"sanskrit":"न","iast":"na","meaning":"not"},
+                    {"sanskrit":"असत्","iast":"asat","meaning":"non-being"},
+                    {"sanskrit":"आसीत्","iast":"āsīt","meaning":"was"},
+                    {"sanskrit":"सत्","iast":"sat","meaning":"being"},
+                ],
+                "translations": [
+                    {"author":"A. A. Macdonell","text":"Then was not non-existent nor existent: there was no realm of air, no sky beyond it. What covered in, and where? and what gave shelter? Was water there, unfathomed depth of water?"},
+                    {"author":"Wendy Doniger","text":"There was neither non-existence nor existence then; there was neither the realm of space nor the sky which is beyond."},
+                ],
+                "commentaries": [
+                    {"author":"Sāyaṇa","text":"The Nāsadīya Sūkta is the ancient hymn of creation, asking what preceded existence itself."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Bhagavad Gita", "reference": "18.66",
+                "devanagari": "सर्वधर्मान्परित्यज्य मामेकं शरणं व्रज।\nअहं त्वा सर्वपापेभ्यो मोक्षयिष्यामि मा शुचः॥",
+                "iast": "sarva-dharmān parityajya mām ekaṃ śaraṇaṃ vraja |\nahaṃ tvāṃ sarva-pāpebhyo mokṣayiṣyāmi mā śucaḥ ||",
+                "word_by_word": [
+                    {"sanskrit":"सर्व","iast":"sarva","meaning":"all"},
+                    {"sanskrit":"धर्मान्","iast":"dharmān","meaning":"duties"},
+                    {"sanskrit":"परित्यज्य","iast":"parityajya","meaning":"having abandoned"},
+                    {"sanskrit":"शरणम्","iast":"śaraṇam","meaning":"refuge"},
+                ],
+                "translations": [
+                    {"author":"Rāmānuja","text":"Abandoning all duties, take refuge in Me alone; I shall liberate thee from all sins, do not grieve."},
+                    {"author":"Śaṅkara","text":"Relinquishing all dharmas, come to Me, the one, for refuge; I shall liberate thee from all sins, grieve not."},
+                ],
+                "commentaries": [
+                    {"author":"Rāmānuja","text":"The carama-śloka of the Gita: complete surrender (prapatti) as the ultimate path."},
+                    {"author":"Śaṅkara","text":"Understood as jñāna-niṣṭhā — the abandonment of the notion of doership."},
+                ],
+                "audio_url": "",
+            },
+        ]
+        for v in verses:
+            v["created_at"] = now_utc().isoformat()
+        await db.verses.insert_many(verses)
+        logger.info("Seeded verses")
+
+    verse_docs = await db.verses.find({}).to_list(20)
+    verse_ids = [str(v["_id"]) for v in verse_docs]
+
+    # Seed offerings
+    if await db.offerings.count_documents({}) == 0:
+        offerings = [
+            {
+                "title": "Bhagavad Gita — A Verse-by-Verse Journey", "subtitle": "Foundation Course",
+                "description": "A rigorous, verse-by-verse study of the Bhagavad Gita across 18 chapters, presented with attributed translations from Śaṅkara, Rāmānuja, and modern commentators. Includes the Shloka Player for every verse.",
+                "type": "recorded_course", "track": "A", "subject": "Bhagavad Gita",
+                "price_inr": 4999, "price_usd": 79, "duration": "12 weeks self-paced",
+                "acharya_id": acharya_id, "verses": verse_ids[:3],
+                "modules": [
+                    {"title":"Chapter 1: Arjuna's Sorrow","lessons":[{"title":"The Setting","verse_id":""},{"title":"Arjuna's Dilemma","verse_id":""}]},
+                    {"title":"Chapter 2: Sāṅkhya Yoga","lessons":[{"title":"Verse 2.20 — On the Eternal Self","verse_id":verse_ids[1] if len(verse_ids)>1 else ""},{"title":"Verse 2.47 — Karma Yoga","verse_id":verse_ids[0] if verse_ids else ""}]},
+                    {"title":"Chapter 18: Mokṣa Sannyāsa Yoga","lessons":[{"title":"Verse 18.66 — Complete Surrender","verse_id":verse_ids[4] if len(verse_ids)>4 else ""}]},
+                ],
+                "image_url": "https://images.pexels.com/photos/15235034/pexels-photo-15235034.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "Gita Jayanti", "start_date": "",
+            },
+            {
+                "title": "Sanskrit for Absolute Beginners", "subtitle": "Language & Grammar",
+                "description": "Devanagari script, sandhi, and foundational grammar. By the end, you will read your first śloka on your own.",
+                "type": "live_course", "track": "B", "subject": "Sanskrit",
+                "price_inr": 8999, "price_usd": 149, "duration": "8-week cohort",
+                "acharya_id": acharya_id, "verses": [],
+                "modules": [
+                    {"title":"Week 1: Devanagari","lessons":[{"title":"Vowels (svara)"},{"title":"Consonants (vyañjana)"}]},
+                    {"title":"Week 2: Sandhi","lessons":[{"title":"Vowel sandhi"},{"title":"Visarga sandhi"}]},
+                ],
+                "image_url": "https://images.pexels.com/photos/7128756/pexels-photo-7128756.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "Vasant Panchami", "start_date": "",
+            },
+            {
+                "title": "Rudram — A 40-Day Sadhana", "subtitle": "Practice & Recitation",
+                "description": "A daily practice aligned to the ritual calendar. Take a sankalpa, chant with the cohort, count japa, and let the tradition move through you.",
+                "type": "sadhana", "track": "C", "subject": "Mantras",
+                "price_inr": 2999, "price_usd": 49, "duration": "40 days",
+                "acharya_id": acharya_id, "verses": [],
+                "modules": [{"title":"Day 1: Sankalpa","lessons":[{"title":"Taking the Vow"}]}],
+                "image_url": "https://images.unsplash.com/photo-1506126613408-eca07ce68773?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHxwZXJzb24lMjBtZWRpdGF0aW5nJTIwY2FsbSUyMHdhcm0lMjBsaWdodHxlbnwwfHx8fDE3ODM0NTUxMTl8MA&ixlib=rb-4.1.0&q=85",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "Maha Shivaratri", "start_date": "",
+            },
+            {
+                "title": "Introduction to Vedic Astrology as Śāstra", "subtitle": "The Discipline, not the Fortune",
+                "description": "Astrology taught as a technical discipline — read a chart, understand yogas, learn the vocabulary. We do not tell fortunes; we teach the śāstra.",
+                "type": "recorded_course", "track": "B", "subject": "Astrology",
+                "price_inr": 5999, "price_usd": 89, "duration": "10 weeks self-paced",
+                "acharya_id": acharya_id, "verses": [],
+                "modules": [],
+                "image_url": "https://images.unsplash.com/photo-1658658160512-878184180267?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwyfHxoaW5kdSUyMHRlbXBsZSUyMHNpbGhvdWV0dGUlMjBtaW5pbWFsJTIwYXJjaGl0ZWN0dXJlfGVufDB8fHx8MTc4MjExNjM4OHww&ixlib=rb-4.1.0&q=85",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "", "start_date": "",
+            },
+            {
+                "title": "Upanishads — A Free Masterclass", "subtitle": "The Wisdom Chapters",
+                "description": "A single 90-minute live session introducing the Upanishads. Free. No credit card, no strings.",
+                "type": "masterclass", "track": "A", "subject": "Upanishads",
+                "price_inr": 0, "price_usd": 0, "duration": "90 minutes",
+                "acharya_id": acharya_id, "verses": [verse_ids[2]] if len(verse_ids)>2 else [],
+                "modules": [], "image_url": "",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "", "start_date": "",
+            },
+            {
+                "title": "The Rigveda — Nāsadīya Sūkta Deep Dive", "subtitle": "Workshop",
+                "description": "Three sessions on the Hymn of Creation — its language, its philosophy, its place in the Ṛgvedic tradition.",
+                "type": "workshop", "track": "A", "subject": "Vedas",
+                "price_inr": 1999, "price_usd": 39, "duration": "3 sessions",
+                "acharya_id": acharya_id, "verses": [verse_ids[3]] if len(verse_ids)>3 else [],
+                "modules": [], "image_url": "",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "", "start_date": "",
+            },
+            {
+                "title": "Bhagavad Gita for Practitioners", "subtitle": "E-book",
+                "description": "In-browser reader with embedded Devanagari, transliteration, and side-by-side translations.",
+                "type": "ebook", "track": "A", "subject": "Bhagavad Gita",
+                "price_inr": 499, "price_usd": 9, "duration": "Digital",
+                "acharya_id": acharya_id, "verses": verse_ids[:2],
+                "modules": [], "image_url": "",
+                "is_published": True, "approved_by_acharya": True,
+                "festival": "", "start_date": "",
+            },
+        ]
+        for o in offerings:
+            o["created_at"] = now_utc().isoformat()
+            o["created_by"] = ""
+            o["approval_notes"] = ""
+        await db.offerings.insert_many(offerings)
+        logger.info("Seeded offerings")
+
+    # Live sessions
+    if await db.live_sessions.count_documents({}) == 0:
+        o1 = await db.offerings.find_one({"type": "live_course"})
+        offering_id = str(o1["_id"]) if o1 else ""
+        starts_in = now_utc() + timedelta(minutes=3)  # imminent so testing works
+        later = now_utc() + timedelta(days=2)
+        await db.live_sessions.insert_many([
+            {"title":"Live Session: Devanagari Kickoff", "offering_id": offering_id,
+             "acharya_id": acharya_id, "starts_at": starts_in.isoformat(),
+             "duration_min": 90, "mode":"interactive"},
+            {"title":"Live Q&A: Sanskrit Sandhi", "offering_id": offering_id,
+             "acharya_id": acharya_id, "starts_at": later.isoformat(),
+             "duration_min": 60, "mode":"broadcast"},
+        ])
+
+    # Festival calendar
+    if await db.festivals.count_documents({}) == 0:
+        await db.festivals.insert_many([
+            {"name":"Maha Shivaratri","date":"2026-02-15","significance":"Night of Shiva — ideal for Rudram sadhana","related_offering_subject":"Mantras","deity":"Shiva"},
+            {"name":"Vasant Panchami","date":"2026-01-22","significance":"Beginning of spring — Saraswati puja, launch of Sanskrit studies","related_offering_subject":"Sanskrit","deity":"Saraswati"},
+            {"name":"Gita Jayanti","date":"2026-11-30","significance":"Birthday of the Bhagavad Gita","related_offering_subject":"Bhagavad Gita","deity":"Krishna"},
+            {"name":"Navratri","date":"2026-10-01","significance":"Nine-night Devi sadhana","related_offering_subject":"Mantras","deity":"Durga"},
+            {"name":"Guru Purnima","date":"2026-07-19","significance":"Full moon of the teacher","related_offering_subject":"Vedas","deity":"Guru"},
+        ])
+
+    # Blogs / Journal
+    if await db.blogs.count_documents({}) == 0:
+        blogs = [
+            {"slug":"read-your-palm","title":"Palmistry — Your Hands Are Talking","category":"palmistry",
+             "excerpt":"You carry a map with you everywhere. And yet, you've never stopped to read it. This is how to begin — with reverence, not superstition.",
+             "cover_image":"https://images.unsplash.com/photo-1518709911915-712d5fd04677?w=1200&q=85&auto=format&fit=crop",
+             "author_name":"Ācharya Vishwanath Shastri","read_time":"7 min",
+             "body":"Palmistry (hasta-sāmudrika) is one of the oldest of the vedāṅga-adjacent disciplines. Long before it became a fairground novelty, it was a rigorous system of correlating the hand — its lines, mounts, and shapes — with the psychology and karma of the person. In the traditional treatment, the hand is not a fortune-telling window but a map of dispositions.\n\nStart with the four elements of the hand: the shape of the palm, the length of the fingers, the flexibility of the thumb, and the texture of the skin. Only after this typology do the classical readers move to the lines — Ayurekha (life), Manasarekha (mind), Hridayarekha (heart), and Bhagyarekha (destiny). Modern popular palmistry often skips typology entirely; classical palmistry begins there.\n\nThis is where we teach it — as a study, not a prophecy."},
+            {"slug":"tarot-cosmic-arrow","title":"Tarot — The Cosmic Arrow","category":"tarot",
+             "excerpt":"You've heard tarot is 'just for psychics' or 'all fake.' Both miss the point. Here's how to read tarot as a mirror for the mind.",
+             "cover_image":"https://images.unsplash.com/photo-1602934585418-f588bea4215c?w=1200&q=85&auto=format&fit=crop",
+             "author_name":"Anamika Sharma","read_time":"6 min",
+             "body":"Tarot is a set of seventy-eight symbolic images designed to make the intangible legible. The Major Arcana (22 cards) trace the arc of consciousness — from The Fool's first step to The World's completion. The Minor Arcana (56 cards) speak the language of daily life: work, love, conflict, growth.\n\nA tarot reading is not a prediction. It is a structured invitation to attention. When a card lands in the 'Past' position, it does not tell you what happened — it asks: which pattern from before is still moving you? When a card lands in the 'Future,' it does not decide anything — it asks: what direction is your current momentum pointing?\n\nStudied this way, tarot is close cousin to journaling, close cousin to therapy, close cousin to darśana. It is not a way to know the future. It is a way to know yourself before the future arrives."},
+            {"slug":"home-luck-vastu","title":"Home, Luck, and Vastu","category":"vastu",
+             "excerpt":"Most people blame bad timing. Some blame the economy. A few blame themselves. What if the direction your bed faces has something to say?",
+             "cover_image":"https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1200&q=85&auto=format&fit=crop",
+             "author_name":"Prem Kumar Mishra","read_time":"9 min",
+             "body":"Vāstu-śāstra is the classical Indian science of built space. It predates Feng Shui by a millennium and rests on a different premise: that a dwelling participates in the same directional and elemental order as the cosmos, and that aligning the two produces harmony — not luck, but harmony.\n\nThe eight cardinal and inter-cardinal directions each have a presiding deva and an elemental quality. The northeast (Iśāna) is water and openness. The southwest (Nairṛta) is earth and mass. A well-laid home places the heavy in the heavy direction, the open in the open direction, and lets the elements do their work.\n\nWe teach vāstu as the study of proportion and correspondence — not as a way to attract wealth. Wealth, when it comes, is a by-product of harmony; harmony is the actual teaching."},
+            {"slug":"why-gita-still-matters","title":"Why the Bhagavad Gītā Still Matters","category":"gita",
+             "excerpt":"Two-thousand-plus years old. Still relevant. Here's why the Gītā is the closest thing we have to a psychological manual for adulthood.",
+             "cover_image":"https://images.pexels.com/photos/15235034/pexels-photo-15235034.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+             "author_name":"Ācharya Vishwanath Shastri","read_time":"11 min",
+             "body":"Arjuna's crisis on the field of Kurukṣetra is the crisis of anyone who has ever had to act despite being unsure. That is what the Gītā is about. It is not primarily a religious text. It is primarily a manual for how to act in the world without being consumed by the act.\n\nKarma-yoga is one of its answers: do the work, but detach the self from the fruit. Jñāna-yoga is another: understand what you truly are, and the question of action reframes itself. Bhakti-yoga is a third: give the outcome to the Divine and stop carrying it. The Gītā does not force a choice; it holds three doors open.\n\nIt is old, but it is not dated. Adulthood in every century asks the same question Arjuna asks. The Gītā's answer, taught with attribution and rigour, is why our Verse-by-Verse Journey exists."},
+            {"slug":"panchang-not-app","title":"Read the Panchang Yourself — Don't Use an App","category":"panchang",
+             "excerpt":"A Panchang is a five-limbed calendar. Learning to read it takes an evening. It's more useful than most horoscope apps.",
+             "cover_image":"https://images.unsplash.com/photo-1610375461369-d613b564f4c4?w=1200&q=85&auto=format&fit=crop",
+             "author_name":"Vishvaa Sureeliya","read_time":"5 min",
+             "body":"Pañcāṅga means 'five-limbed.' The five limbs are Tithi (lunar day), Vāra (weekday), Nakṣatra (lunar mansion), Yoga (a specific sun-moon relationship), and Karaṇa (half-tithi). Together they describe the qualitative texture of the day.\n\nMost apps just show them. They do not teach you what to do with them. Our Advanced Panchang course does — because a Tithi is only useful if you know that Ekādaśī is for restraint and Pūrṇimā is for completion; a Nakṣatra is only useful if you know that Puṣya is the friendliest and Mūla the fiercest.\n\nRead the Panchang yourself. Then decide."},
+        ]
+        for b in blogs:
+            b["created_at"] = now_utc().isoformat()
+        await db.blogs.insert_many(blogs)
+        logger.info("Seeded blogs")
+
+    # Webinars
+    if await db.webinars.count_documents({}) == 0:
+        base = now_utc()
+        webinars = [
+            {"title":"Mega Astrology Webinar","cover_image":"https://images.unsplash.com/photo-1519638399535-1b036603ac77?w=1200&q=85&auto=format&fit=crop",
+             "starts_at": (base + timedelta(days=2, hours=3)).isoformat(),"duration_min":90,
+             "price_inr":99,"orig_price_inr":999,"mentor_name":"Ācharya Vishwanath Shastri",
+             "description":"A single-evening intensive on how to actually read a chart. Bring your birth details.",
+             "seats_remaining": 43},
+            {"title":"Kundli Pathshālā — The Basics","cover_image":"https://images.unsplash.com/photo-1502134249126-9f3755a50d78?w=1200&q=85&auto=format&fit=crop",
+             "starts_at": (base + timedelta(days=3, hours=8)).isoformat(),"duration_min":75,
+             "price_inr":11,"orig_price_inr":99,"mentor_name":"Ananya Iyer",
+             "description":"Start reading a kundli in one sitting. From ascendant to bhāvas, live.",
+             "seats_remaining": 128},
+            {"title":"Numerology Mega Webinar","cover_image":"https://images.unsplash.com/photo-1518709414-8ec7999b32a0?w=1200&q=85&auto=format&fit=crop",
+             "starts_at": (base + timedelta(days=5, hours=8, minutes=30)).isoformat(),"duration_min":120,
+             "price_inr":99,"orig_price_inr":999,"mentor_name":"Ānanya Iyer",
+             "description":"Mulānka, bhāgyānka, and the actual mathematics behind name-numbers.",
+             "seats_remaining": 71},
+            {"title":"Palmistry — Read Your Palm Live","cover_image":"https://images.unsplash.com/photo-1518709911915-712d5fd04677?w=1200&q=85&auto=format&fit=crop",
+             "starts_at": (base + timedelta(days=6, hours=8)).isoformat(),"duration_min":90,
+             "price_inr":49,"orig_price_inr":999,"mentor_name":"Prem Kumar Mishra",
+             "description":"The four elements of the hand, and the four classical lines. A live diagnostic clinic.",
+             "seats_remaining": 22},
+            {"title":"Swar Vigyān — Breath as Instrument","cover_image":"https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=1200&q=85&auto=format&fit=crop",
+             "starts_at": (base + timedelta(days=8, hours=8)).isoformat(),"duration_min":150,
+             "price_inr":8000,"orig_price_inr":10000,"mentor_name":"Śilpiaa Vermā",
+             "description":"Two-evening bootcamp. Go beyond breath — master energy, awareness, consciousness.",
+             "seats_remaining": 15},
+        ]
+        await db.webinars.insert_many(webinars)
+        logger.info("Seeded webinars")
+
+    # Mentors
+    if await db.mentors.count_documents({}) == 0:
+        mentors = [
+            {"name":"Ācharya Vishwanath Shastri","title":"Vedas · Upaniṣads · Bhagavad Gītā",
+             "avatar":"https://images.unsplash.com/photo-1622902046580-2b47f47f5471?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Sringeri Śāradā Pīṭham lineage","order":1,
+             "credentials":["PhD, Sanskrit — Banaras Hindu University","Fourth-generation Vedic scholar","25+ years teaching Advaita Vedānta"],
+             "bio":"Fourth-generation Vedic scholar specializing in Advaita Vedānta. Signs off on every scriptural course under his name."},
+            {"name":"Śilpiaa Vermā","title":"Sādhana · Tantra · Devī Practices",
+             "avatar":"https://images.unsplash.com/photo-1594744803329-e58b31de8bf5?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Śrī Vidyā upāsakā lineage","order":2,
+             "credentials":["Initiated in Śrī Vidyā","Twelve-year Devī sādhana practitioner","Guides 8,000+ sādhaks annually"],
+             "bio":"Ritualist and practitioner. Guides the flagship sādhanas — Varāhī, Kālī, Rudram — through the ritual calendar."},
+            {"name":"Prem Kumar Mishra","title":"Lāl Kitāb · Parāśarī · Bhṛgu Nāḍī",
+             "avatar":"https://images.unsplash.com/photo-1618077360395-f3068be8e001?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Bhṛgu Śāstra tradition, Kashi","order":3,
+             "credentials":["Fifth-generation nāḍī reader","Author of two treatises on Lāl Kitāb","Featured on national television"],
+             "bio":"Astrology as a technical discipline — not a prediction machine. Teaches Parāśarī, Lāl Kitāb, and Bhṛgu Nāḍī with the same rigour a lawyer brings to a case."},
+            {"name":"Vishvaa Sureeliya","title":"Vedic Astrology · KP · Numerology",
+             "avatar":"https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=800&q=90&auto=format&fit=crop",
+             "parampara":"KP Paddhati (Krishnamurti tradition)","order":4,
+             "credentials":["KP Astrology certified","Numerology — 12 years","Published researcher"],
+             "bio":"The bridge between traditional Vedic and modern KP methods. Teaches with a scientist's discipline."},
+            {"name":"Anamikā Sharma","title":"Tarot · Oracle · Shadow Work",
+             "avatar":"https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Modern esoteric with Vedāntic framing","order":5,
+             "credentials":["Certified Tarot practitioner","Trained in Jungian shadow-work","Live-reads for 3,000+ students"],
+             "bio":"Tarot is a mirror. Shadow-work is a discipline. She teaches both as reflective practices, never as prediction."},
+            {"name":"Śreyā Kundu","title":"Vedic Astrology · Energy Healing",
+             "avatar":"https://images.unsplash.com/photo-1580489944761-15a19d654956?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Guru Paramparā, Kolkata","order":6,
+             "credentials":["Vedic Astrology — 15 years","Certified in Prāṇic Healing","Rig-Veda recitation trained"],
+             "bio":"Combines the diagnostic clarity of jyotiṣa with the practice of energetic hygiene. A quiet, precise teacher."},
+            {"name":"Ānanya Iyer","title":"Sanskrit · Grammar · Devanāgarī",
+             "avatar":"https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Pāṇinīya Vyākaraṇa tradition","order":7,
+             "credentials":["PhD, Sanskrit Grammar","Author, Sandhi for Beginners","Trained under Prof. K.R. Vaidyanathan"],
+             "bio":"Makes Pāṇini approachable without simplifying him. The Devanāgarī course you finally finish."},
+            {"name":"Saurav Chaubey","title":"Astrology · Career & Relationships",
+             "avatar":"https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&q=90&auto=format&fit=crop",
+             "parampara":"Independent, trained under multiple gurus","order":8,
+             "credentials":["Jyotiṣa Ratna","Career-focused chart reading — 10 years","Corporate workshops for Fortune-500 firms"],
+             "bio":"For learners who want the practical vocabulary of astrology — career transitions, relationship diagnostics — with strict boundaries on prediction."},
+        ]
+        await db.mentors.insert_many(mentors)
+        logger.info("Seeded mentors")
+
+    # Testimonials
+    if await db.testimonials.count_documents({}) == 0:
+        testimonials = [
+            {"name":"Pooja Agarwal","role":"Tarot Reader & Numerologist","rating":5,
+             "avatar":"https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&q=85&auto=format&fit=crop",
+             "quote":"I feel truly grateful to have been a part of your numerology course. Your way of teaching is not just insightful but also deeply inspiring. The clarity with which you explained even the most complex concepts made it easy to understand and apply.",
+             "course":"Basic Numerology"},
+            {"name":"Ishika Mehta","role":"Learner","rating":5,
+             "avatar":"https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&q=85&auto=format&fit=crop",
+             "quote":"I completed a basic numerology recorded course, and it was truly amazing. The course was easy to follow and provided a great introduction. I learned a lot and found the content engaging.",
+             "course":"Introduction to Astrology"},
+            {"name":"Santosh R Pandey","role":"Operations Professional","rating":5,
+             "avatar":"https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&q=85&auto=format&fit=crop",
+             "quote":"Actively learning for the last 6 months. What attracted me: teaching style is simple and perfectly paced. Complex subjects explained understandably. Syllabus is well researched and deep. Coverage — got varied occult subjects on a single platform.",
+             "course":"Bhagavad Gītā — Verse-by-Verse"},
+            {"name":"Alice Kapoor","role":"Occultist","rating":5,
+             "avatar":"https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&q=85&auto=format&fit=crop",
+             "quote":"Rādhe Rādhe Guruji. I wanted to express my heartfelt gratitude for the guidance you've shared. Your teaching techniques are amazing. The way you explain through stories and day-to-day lingo is wonderful.",
+             "course":"Bhagavad Gītā — Verse-by-Verse"},
+            {"name":"Ishita Patil","role":"IT Professional","rating":5,
+             "avatar":"https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=85&auto=format&fit=crop",
+             "quote":"Energy was insane. A surreal experience. And the coordination was mind blowing — there was not a single moment of low energy. Interaction with the Ācharya felt like a dream come true.",
+             "course":"Rudram Sādhana"},
+            {"name":"Rajesh Kumar","role":"Yoga Teacher","rating":5,
+             "avatar":"https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&q=85&auto=format&fit=crop",
+             "quote":"I have taken many courses online. This is the only one where the Ācharya actually signs off on the accuracy. That single fact gave me the confidence to put the certificate on my résumé.",
+             "course":"Sanskrit Foundations"},
+        ]
+        await db.testimonials.insert_many(testimonials)
+        logger.info("Seeded testimonials")
+
+    # Sample community posts
+        learner = await db.users.find_one({"email": learner_email})
+        if learner:
+            await db.community_posts.insert_many([
+                {"body":"Reading BG 2.47 for the 7th time this year. Every time it lands differently.",
+                 "verse_id": verse_ids[0] if verse_ids else "", "author_id": str(learner["_id"]),
+                 "author_name": learner.get("name",""), "created_at": now_utc().isoformat(), "flagged": False},
+                {"body":"Anyone else find the Nāsadīya Sūkta the most humbling hymn in the Ṛgveda?",
+                 "verse_id": verse_ids[3] if len(verse_ids)>3 else "", "author_id": str(learner["_id"]),
+                 "author_name": learner.get("name",""), "created_at": now_utc().isoformat(), "flagged": False},
+            ])
+
+    # Write test creds
+    creds_path = ROOT_DIR.parent / "memory" / "test_credentials.md"
+    creds_path.parent.mkdir(parents=True, exist_ok=True)
+    creds_path.write_text(f"""# Tredev Learn — Test Credentials
+
+## Super Admin (only role that can revoke certificates / appoint admins)
+- Email: `{super_email}`
+- Password: `{super_pass}`
+
+## Admin
+- Email: `{admin_email}`
+- Password: `{admin_pass}`
+
+## Academic Staff (course builder, quizzes, grading, doubts, consultations)
+- Email: `staff@tredevlearn.com`
+- Password: `Staff@123`
+
+## Acharya (accuracy sign-off; content approval queue)
+- Email: `acharya@tredevlearn.com`
+- Password: `Acharya@123`
+
+## Learner
+- Email: `learner@tredevlearn.com`
+- Password: `Learner@123`
+
+## Auth endpoints
+- POST /api/auth/register (learners only)
+- POST /api/auth/login
+- POST /api/auth/logout
+- GET  /api/auth/me
+""")
+
+
+@app.on_event("startup")
+async def on_startup():
+    # 1) Postgres pool + schema, 2) Firebase Admin SDK, 3) seed.
+    await dbmod.connect(DATABASE_URL)
+    schema_path = ROOT_DIR / "schema.sql"
+    if schema_path.exists():
+        await dbmod.run_sql(schema_path.read_text())
+        logger.info("Schema ensured")
+    ensure_storage_bucket()
+    try:
+        firebase_auth.init_firebase()
+    except Exception as e:
+        logger.exception(f"Firebase init failed: {e}")
+    try:
+        await seed_admin_and_data()
+        logger.info("Startup seed complete")
+    except Exception as e:
+        logger.exception(f"Seed failed: {e}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await dbmod.close()

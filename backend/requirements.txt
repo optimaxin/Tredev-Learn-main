@@ -1,0 +1,11 @@
+fastapi==0.110.1
+uvicorn==0.25.0
+pydantic>=2.6.4
+email-validator>=2.2.0
+python-dotenv>=1.0.1
+python-multipart>=0.0.9
+asyncpg>=0.29.0
+requests>=2.31.0
+pytest>=8.0.0
+pytest-xdist>=3.6.0
+pyswisseph==2.10.3.2

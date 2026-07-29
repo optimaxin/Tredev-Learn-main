@@ -1,0 +1,331 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,400;1,9..144,600&family=Manrope:wght@300;400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Tiro+Devanagari+Sanskrit:ital@0;1&family=Noto+Serif+Devanagari:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* LIGHT — "temple parchment": sacred violet + antique gold foundation,
+       saffron & magenta reserved as warm accents. */
+    --background: 40 44% 96%;              /* warm parchment #FAF7F0 */
+    --foreground: 260 44% 13%;             /* deep indigo ink */
+    --card: 40 46% 99%;
+    --card-foreground: 260 44% 13%;
+    --popover: 40 46% 99%;
+    --popover-foreground: 260 44% 13%;
+    --primary: 258 60% 42%;               /* sacred violet #4F2EA8 */
+    --primary-foreground: 40 50% 98%;
+    --secondary: 325 74% 42%;             /* magenta / kumkum #c02679 */
+    --secondary-foreground: 40 50% 98%;
+    --muted: 40 30% 90%;
+    --muted-foreground: 260 16% 40%;
+    --accent: 40 72% 44%;                 /* antique gold #C99A2E */
+    --accent-foreground: 40 50% 98%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 40 50% 98%;
+    --border: 40 26% 84%;
+    --input: 40 26% 84%;
+    --ring: 258 60% 42%;
+    --radius: 0.75rem;
+
+    /* Extended palette — foundation + warm accents */
+    --violet-deep: 258 60% 42%;           /* primary foundation */
+    --indigo-night: 258 58% 12%;
+    --gold: 40 72% 44%;                   /* antique gold */
+    --gold-light: 44 82% 56%;
+    --saffron: 22 92% 52%;                /* warm accent */
+    --marigold: 42 82% 52%;
+    --vermilion: 5 78% 50%;
+    --kumkum: 355 68% 44%;
+    --magenta: 325 78% 45%;
+    --peacock: 178 60% 32%;
+  }
+
+  .dark {
+    /* DARK — "cosmic midnight": deep indigo night, violet + gold jewels,
+       saffron glow for warm accents. */
+    --background: 258 56% 7%;             /* deep cosmic indigo #0D0620 */
+    --foreground: 42 40% 91%;
+    --card: 258 42% 11%;
+    --card-foreground: 42 40% 91%;
+    --popover: 258 42% 11%;
+    --popover-foreground: 42 40% 91%;
+    --primary: 262 72% 68%;              /* violet glow */
+    --primary-foreground: 258 56% 7%;
+    --secondary: 325 72% 60%;            /* magenta glow */
+    --secondary-foreground: 42 42% 95%;
+    --muted: 258 32% 16%;
+    --muted-foreground: 42 24% 70%;
+    --accent: 44 86% 62%;               /* gold glow */
+    --accent-foreground: 258 56% 7%;
+    --destructive: 0 66% 52%;
+    --destructive-foreground: 42 42% 95%;
+    --border: 258 30% 20%;
+    --input: 258 30% 20%;
+    --ring: 262 72% 68%;
+
+    --violet-deep: 262 72% 68%;
+    --indigo-night: 258 58% 10%;
+    --gold: 44 86% 62%;
+    --gold-light: 46 90% 68%;
+    --saffron: 28 95% 60%;
+    --marigold: 40 88% 58%;
+    --vermilion: 8 82% 58%;
+    --kumkum: 350 72% 56%;
+    --magenta: 325 72% 60%;
+    --peacock: 176 56% 46%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html, body {
+    @apply bg-background text-foreground;
+    font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* NOTE: deliberately NO overflow clipping on html/body/#root — it makes the
+     sticky header unreliable in Chrome. Full-bleed elements are clipped at the
+     section level via overflow-hidden instead. */
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', 'Cormorant Garamond', ui-serif, Georgia, serif;
+    letter-spacing: -0.015em;
+    font-variation-settings: "opsz" 144;
+  }
+  .font-display { font-family: 'Fraunces', 'Cormorant Garamond', serif; font-variation-settings: "opsz" 144; }
+  .font-editorial { font-family: 'Cormorant Garamond', serif; }
+  .font-devanagari { font-family: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif; }
+  .devanagari-body { font-family: 'Noto Serif Devanagari', serif; line-height: 1.9; }
+}
+
+/* ---------- Layout container (single source of truth) ----------
+   Every page section, the header and the footer share this width + gutters
+   so the whole site aligns to one column. Scales up on very wide displays. */
+.site-container {
+  width: 100%;
+  max-width: 1400px;
+  margin-inline: auto;
+  padding-inline: 1.5rem;          /* = px-6 */
+}
+@media (min-width: 1024px) {        /* = lg:px-10 */
+  .site-container { padding-inline: 2.5rem; }
+}
+@media (min-width: 1536px) {        /* fill wide / zoomed-out screens */
+  .site-container { max-width: 1560px; }
+}
+
+/* ---------- Backgrounds & auras ---------- */
+.bg-parchment {
+  background:
+    radial-gradient(1200px circle at 12% 8%, hsl(258 60% 42% / 0.10), transparent 45%),
+    radial-gradient(900px circle at 85% 12%, hsl(40 72% 48% / 0.12), transparent 50%),
+    radial-gradient(1000px circle at 50% 100%, hsl(325 78% 45% / 0.08), transparent 55%),
+    hsl(var(--background));
+}
+.dark .bg-parchment {
+  background:
+    radial-gradient(1200px circle at 12% 8%, hsl(262 72% 60% / 0.16), transparent 45%),
+    radial-gradient(900px circle at 85% 12%, hsl(44 86% 62% / 0.10), transparent 50%),
+    radial-gradient(1000px circle at 50% 100%, hsl(325 72% 58% / 0.12), transparent 55%),
+    hsl(var(--background));
+}
+
+.noise-overlay {
+  position: relative;
+}
+.noise-overlay::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.35'/></svg>");
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+}
+
+/* Cosmic orbs for dark hero */
+.orb {
+  position: absolute; border-radius: 999px; filter: blur(70px); opacity: 0.55; pointer-events: none;
+}
+.orb-saffron { background: radial-gradient(circle, hsl(22 92% 55%), transparent 70%); }
+.orb-magenta { background: radial-gradient(circle, hsl(325 78% 55%), transparent 70%); }
+.orb-gold    { background: radial-gradient(circle, hsl(44 86% 60%), transparent 70%); }
+.orb-violet  { background: radial-gradient(circle, hsl(262 66% 58%), transparent 70%); }
+
+/* Sacred geometry container — violet + gold foundation with warm accents */
+.mandala {
+  position: absolute; width: 640px; height: 640px; pointer-events: none;
+  background: conic-gradient(from 0deg,
+    hsl(258 60% 45% / 0.12) 0deg,
+    hsl(40 72% 50% / 0.10) 90deg,
+    hsl(325 78% 48% / 0.08) 180deg,
+    hsl(22 92% 52% / 0.08) 270deg,
+    hsl(258 60% 45% / 0.12) 360deg);
+  border-radius: 999px; filter: blur(40px); animation: slow-spin 60s linear infinite;
+}
+@keyframes slow-spin { to { transform: rotate(360deg); } }
+@keyframes float-y { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-14px);} }
+
+/* Glass */
+.glass {
+  background: hsl(var(--card) / 0.75);
+  backdrop-filter: blur(24px) saturate(1.3);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  border: 1px solid hsl(var(--border) / 0.6);
+}
+.glass-strong {
+  background: hsl(var(--card) / 0.92);
+  backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid hsl(var(--border));
+}
+
+/* Gradient utilities
+   - "hot"    = warm accent (saffron→magenta→gold) for CTAs & energy
+   - "cosmic" = sacred brand gradient (violet→gold→saffron)
+   - "sacred" = deep foundation (violet→indigo→magenta)
+   - "gold"   = antique gold sheen */
+.text-gradient-hot {
+  background: linear-gradient(120deg, hsl(22 92% 52%), hsl(325 78% 52%), hsl(42 82% 52%));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.text-gradient-cosmic {
+  background: linear-gradient(120deg, hsl(258 62% 56%), hsl(40 78% 52%), hsl(22 92% 55%));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.dark .text-gradient-cosmic {
+  background: linear-gradient(120deg, hsl(262 74% 72%), hsl(44 88% 64%), hsl(28 95% 62%));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.text-gradient-gold {
+  background: linear-gradient(120deg, hsl(40 72% 46%), hsl(46 86% 60%), hsl(38 70% 44%));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.bg-gradient-hot {
+  background: linear-gradient(120deg, hsl(22 92% 52%), hsl(325 78% 45%));
+}
+.bg-gradient-sacred {
+  background: linear-gradient(120deg, hsl(258 60% 42%), hsl(268 58% 32%), hsl(325 68% 42%));
+}
+.bg-gradient-cosmic {
+  background: linear-gradient(135deg, hsl(258 60% 15%), hsl(268 62% 25%), hsl(325 60% 22%));
+}
+.bg-gradient-gold {
+  background: linear-gradient(120deg, hsl(40 72% 46%), hsl(46 84% 56%));
+}
+
+/* Overlines */
+.overline {
+  font-family: 'Manrope', sans-serif;
+  font-size: 0.7rem; letter-spacing: 0.24em; text-transform: uppercase;
+  font-weight: 600;
+  color: hsl(var(--accent));
+}
+
+/* Elegant hover underline */
+.link-underline { position: relative; }
+.link-underline::after {
+  content: ""; position: absolute; left: 0; bottom: -3px; height: 1px; width: 0;
+  background: currentColor; transition: width 300ms cubic-bezier(0.16,1,0.3,1);
+}
+.link-underline:hover::after { width: 100%; }
+
+/* Cards */
+.card-elevated {
+  transition: transform 300ms ease-out, box-shadow 300ms ease-out, border-color 300ms;
+}
+.card-elevated:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 48px -22px hsl(258 60% 32% / 0.40);
+  border-color: hsl(var(--accent));
+}
+.dark .card-elevated:hover {
+  box-shadow: 0 22px 48px -20px hsl(262 72% 50% / 0.45);
+}
+
+/* Ritual japa dot */
+.mala-dot {
+  width: 10px; height: 10px; border-radius: 999px; background: hsl(var(--muted));
+  transition: background-color 300ms, transform 300ms;
+}
+.mala-dot.filled { background: hsl(var(--accent)); }
+.mala-dot.today { background: hsl(var(--primary)); transform: scale(1.4); box-shadow: 0 0 12px hsl(var(--primary) / 0.6); }
+
+/* Glow buttons */
+.btn-glow {
+  box-shadow: 0 6px 24px -6px hsl(22 92% 52% / 0.5);
+}
+.btn-glow:hover {
+  box-shadow: 0 10px 32px -6px hsl(22 92% 52% / 0.65);
+}
+
+/* Focus ring */
+:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; border-radius: 4px; }
+
+/* Utility */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--muted)); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.5); }
+
+/* Marquee */
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.marquee-track { animation: marquee 45s linear infinite; }
+.marquee-track-slow { animation: marquee 80s linear infinite; }
+/* Pause the loop while the visitor is reading it */
+.marquee-track:hover, .marquee-track-slow:hover { animation-play-state: paused; }
+/* Respect users who prefer less motion — freeze marquees & decorative loops */
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track, .marquee-track-slow { animation: none; }
+  .animate-float, .mandala, .pulse-glow { animation: none !important; }
+}
+.marquee-fade {
+  mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+}
+
+/* Chip */
+.chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.25rem 0.6rem; border-radius: 999px;
+  font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600;
+}
+
+/* Ornament divider */
+.ornament {
+  display: flex; align-items: center; gap: 1rem; color: hsl(var(--accent));
+}
+.ornament::before, .ornament::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(to right, transparent, hsl(var(--accent) / 0.5), transparent);
+}
+
+/* Countdown pulse */
+@keyframes pulse-glow {
+  0%,100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4); }
+  50%     { box-shadow: 0 0 0 12px hsl(var(--primary) / 0); }
+}
+.pulse-glow { animation: pulse-glow 2s ease-out infinite; }
+
+/* Fade-in-up */
+@keyframes fade-in-up { from { opacity: 0; transform: translateY(16px);} to { opacity:1; transform:none;} }
+.fade-in-up { animation: fade-in-up 0.7s cubic-bezier(0.16,1,0.3,1) both; }
+
+/* Aspect ratio helpers */
+.aspect-portrait { aspect-ratio: 3/4; }
+
+/* ---------- Printable certificate ---------- */
+.cert-print-area { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+@media print {
+  /* The cert modal is portalled to <body>; hide the whole app, show only the cert. */
+  #root { display: none !important; }
+  .no-print { display: none !important; }
+  .cert-portal { position: static !important; background: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; padding: 0 !important; display: block !important; overflow: visible !important; }
+  /* Fixed dimensions fit exactly one A4-landscape page; kill all shadows. */
+  .cert-portal, .cert-portal * { box-shadow: none !important; }
+  .cert-print-area { position: static !important; margin: 0 auto !important; width: 277mm !important; height: 190mm !important; aspect-ratio: auto !important; max-width: none !important; overflow: hidden !important; break-inside: avoid !important; page-break-inside: avoid !important; }
+  html, body { height: auto !important; background: #fff !important; }
+  @page { size: A4 landscape; margin: 8mm; }
+}

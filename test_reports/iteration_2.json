@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 2 — new-feature testing for Tredev Learn. Backend: extended pytest suite to 51 tests (34 iter1 regression + 17 new). All 51 PASSED covering new endpoints /blogs (list/filter/detail/404), /webinars (5 seeded, starts_in_seconds, is_live, sorted asc), /mentors (8 seeded, sorted by order, all fields), /testimonials (6 seeded, ratings 1-5), /stats (learners>=620000, paths>=60, google_rating=4.8, mentors>=30, years_of_legacy=51), /calculators/tarot (3-card spread Past/Present/Future, deterministic per question, accepts empty), /calculators/ram-shalaka (rejects empty q with 400, returns answer+note). Frontend Playwright verified: hero carousel with 4 dots, nav bar with all 7 items (Courses/Webinars/Mentors/Free Tools/Journal/Events/Consultation), stats ribbon shows 620K learners, Featured In / Trending / Free Tools / Mentors / Journal / Community / Consultation sections all render, floating chat opens & returns scripted 'gita' reply, /blog list 5 cards + detail navigation works (BlogDetail renders title), /webinars /mentors /events /about pages all render, Calculators has tab-tarot & tab-shalaka; tarot submit produces result element; shalaka submit produces answer text; theme toggle switches html class from 'dark' (default) to light. No critical bugs found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global (unauth pages)", "issues": ["/api/auth/me returns 401 on every page load, printed as 20+ console errors. Same finding as iter1 — consider suppressing the console noise for the silent auth probe."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_iteration2.py",
+    "/app/test_reports/pytest/iteration2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1605 lines — even larger monolith than iter1. Strongly recommend splitting into routers/domain modules (blogs, webinars, mentors, testimonials, calculators, etc.). Not blocking MVP.",
+    "POST /api/calculators/tarot and /calculators/ram-shalaka take raw `dict` payloads with no Pydantic schema — same concern noted for offerings/consultations patches in iter1. Recommend a TarotRequest / ShalakaRequest Pydantic model with a `question: str` field.",
+    "GET /api/webinars response: 'starts_in_seconds' becomes negative for past webinars within the 2-hour grace window (kept as 'is_live' when |delta|<=90min). Consumers rendering countdown must guard against negative values — verify FE handles this (current countdown UI appeared fine).",
+    "Tarot 'deterministic per question' uses Python's built-in `hash()` which is salted per-process. Multiple backend workers would return different spreads for the same question. Consider hashlib.sha256(question) for cross-worker determinism.",
+    "/api/stats does DB count_documents on every request (6 collections). For a landing-page hot endpoint, consider caching with a short TTL (60s) to avoid load."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration2.py (created)"],
+  "success_rate": {"backend": "100% (51/51)", "frontend": "100% of tested new features"},
+  "test_credentials": "See /app/memory/test_credentials.md — verified in iter1, no auth changes in iter2.",
+  "seed_data_creation": "None — all seeded automatically by backend startup (5 blogs, 5 webinars, 8 mentors, 6 testimonials).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression suite: run `REACT_APP_BACKEND_URL=<url> pytest backend/tests/ -v` — combines iter1 (backend_test.py, 34 cases) + iter2 (test_iteration2.py, 17 cases) = 51 total, all passing. Frontend new sections verified: hero carousel dots (hero-dot-0..3), floating chat (chat-toggle/chat-widget/chat-input/chat-send/chat-close), 7-item nav bar, /blog + /blog/:slug + /webinars + /mentors + /events + /about pages, tab-tarot & tab-shalaka in Calculators. Default theme is dark (html.dark class), toggles cleanly. Existing iter1 flows (auth for 5 roles, sadhana, consultation, certificate verify, panchang/numerology/kundli/transliteration calculators, community, live-sessions mock join, admin RBAC) all still pass.",
+  "rca of the issue": "N/A — no bugs found."
+}
