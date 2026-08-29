@@ -10,6 +10,8 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import re
+import csv
+import io
 import logging
 import secrets
 import random
@@ -108,6 +110,43 @@ def require_role(*roles):
     return checker
 
 
+def require_feature(key: str):
+    async def checker():
+        toggle = await db.feature_toggles.find_one({"key": key})
+        if toggle and toggle.get("enabled") is False:
+            raise HTTPException(status_code=403, detail=f"Feature '{key}' is currently disabled")
+        return True
+    return checker
+
+
+async def has_capability(user_id: str, capability: str) -> bool:
+    grant = await db.capability_grants.find_one({"staff_id": user_id, "capability": capability})
+    return grant is not None
+
+
+async def check_feature_enabled(key: str):
+    """Manual (non-Depends) feature-toggle check — used where the toggle key depends on
+    request data (e.g. a quiz's context) rather than being fixed at route-declaration time."""
+    toggle = await db.feature_toggles.find_one({"key": key})
+    if toggle and toggle.get("enabled") is False:
+        raise HTTPException(status_code=403, detail=f"Feature '{key}' is currently disabled")
+
+
+def quiz_feature_key(context: str) -> str:
+    """Quizzes ('event' context) and Assessments ('course' context) are decoupled features."""
+    return "assessments" if context == "course" else "quizzes"
+
+
+async def check_quiz_capability(actor: dict, context: str):
+    """Per-staff capability grant, independent of the global feature toggle."""
+    if actor["role"] != "academic_staff":
+        return
+    cap = "assessment_author" if context == "course" else "quiz_author"
+    if not await has_capability(actor["id"], cap):
+        label = "Assessment" if context == "course" else "Quiz"
+        raise HTTPException(403, f"{label} authoring has not been granted to you by admin — ask an admin to grant the '{cap}' capability.")
+
+
 async def write_audit(actor: dict, action: str, target: str = "", meta: dict = None):
     await db.audit_log.insert_one({
         "actor_id": actor.get("id"),
@@ -191,20 +230,50 @@ class MantraIn(BaseModel):
     audio_url: Optional[str] = ""
 
 class QuizIn(BaseModel):
-    offering_id: str
+    offering_id: Optional[str] = ""
     title: str
-    questions: List[dict]  # [{q, options[], correct_index}]
+    questions: List[dict] = []  # [{id, type: mcq|paragraph, prompt, points, options?, correct?, multiple?, image_url?}]
+    context: str = "event"  # 'event' | 'course'
+    unlock_rule: str = "always"  # 'always' | 'on_course_complete'
+    starts_at: Optional[str] = ""
+    ends_at: Optional[str] = ""
+    festival_id: Optional[str] = ""  # event-context quiz attached to a festival's "Play & Win" card
 
 class QuizAttemptIn(BaseModel):
     quiz_id: str
-    answers: List[int]
+    answers: List[Any] = []  # per-question: int | [int] for mcq, str for paragraph
+    started_at: Optional[str] = ""
+    time_taken_seconds: Optional[int] = None
+
+class QuizLinkEventIn(BaseModel):
+    live_session_id: Optional[str] = ""
+    auto_create: bool = False
+    starts_at: Optional[str] = ""
+
+class AttemptGradeIn(BaseModel):
+    manual_scores: Dict[str, int] = {}
+    feedback: Dict[str, str] = {}
+
+class FeatureToggleIn(BaseModel):
+    enabled: bool
 
 class DoubtIn(BaseModel):
-    offering_id: str
+    offering_id: Optional[str] = ""  # blank = general doubt raised via the chat widget
     question: str
 
 class DoubtAnswerIn(BaseModel):
     answer: str
+
+class QueryTicketIn(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    category_tags: List[str] = []
+
+class QueryMessageIn(BaseModel):
+    message_text: str
+
+class QueryReassignIn(BaseModel):
+    staff_id: Optional[str] = ""
 
 class AcharyaContentIn(BaseModel):
     title: str
@@ -226,6 +295,7 @@ class LiveSessionCreateIn(BaseModel):
     mode: str = "interactive"  # interactive, broadcast
     join_url: Optional[str] = ""
     topic: Optional[str] = ""          # description for standalone (non-course) sessions
+    thumbnail_url: Optional[str] = ""
 
 class LiveSessionUpdateIn(BaseModel):
     title: Optional[str] = None
@@ -236,6 +306,7 @@ class LiveSessionUpdateIn(BaseModel):
     mode: Optional[str] = None
     join_url: Optional[str] = None
     topic: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 class WebinarCreateIn(BaseModel):
     title: str
@@ -269,6 +340,36 @@ class CapabilityGrantIn(BaseModel):
     staff_id: str
     capability: str  # course_builder, quiz_author, grader, doubts, consultations, cohorts
     scope: List[str] = []  # offering ids, or ["*"] for all
+
+class FestivalIn(BaseModel):
+    name: str
+    date: str  # YYYY-MM-DD
+    significance: Optional[str] = ""
+    related_offering_subject: Optional[str] = ""
+    deity: Optional[str] = ""
+
+class FestivalCsvImportIn(BaseModel):
+    csv_text: str
+    mode: str = "replace"  # 'replace' clears the table first; 'append' upserts by (name, date)
+
+class MentorIn(BaseModel):
+    name: str
+    title: str = ""
+    avatar: str = ""
+    parampara: str = ""
+    order: int = 0
+    credentials: List[str] = []
+    bio: str = ""
+
+class BlogIn(BaseModel):
+    slug: str
+    title: str
+    category: str = ""
+    excerpt: str = ""
+    cover_image: str = ""
+    author_name: str = ""
+    read_time: str = ""
+    body: str = ""
 
 class CommunityPostIn(BaseModel):
     body: str
@@ -426,7 +527,8 @@ async def get_offering(offering_id: str):
 
 @api_router.post("/offerings")
 async def create_offering(data: OfferingIn,
-                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                          _feat: bool = Depends(require_feature("offerings"))):
     if not (data.acharya_id or "").strip():
         raise HTTPException(400, "Assign an Ācharya — every course must be routed to one for sign-off.")
     doc = data.model_dump()
@@ -442,7 +544,8 @@ async def create_offering(data: OfferingIn,
 
 @api_router.patch("/offerings/{offering_id}")
 async def update_offering(offering_id: str, data: dict,
-                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                           _feat: bool = Depends(require_feature("offerings"))):
     data.pop("id", None)
     await db.offerings.update_one({"_id": ObjectId(offering_id)}, {"$set": data})
     await write_audit(actor, "offering.update", offering_id, data)
@@ -497,7 +600,8 @@ async def shloka_of_day():
 
 @api_router.post("/verses")
 async def create_verse(data: VerseIn,
-                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                       _feat: bool = Depends(require_feature("verses"))):
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     result = await db.verses.insert_one(doc)
@@ -753,35 +857,152 @@ async def submit_consultation(data: ConsultationIn):
             "expected_callback": expected, "status": doc["status"]}
 
 
+async def purge_old_threads():
+    """7-day retention for the Staff Panel's doubt/consultation blocks — a lazy
+    sweep on read, no scheduler needed. ISO-8601 UTC strings sort chronologically
+    as plain strings, matching how every timestamp in this codebase is stored."""
+    cutoff = (now_utc() - timedelta(days=7)).isoformat()
+    await db.doubts.delete_many({"created_at": {"$lt": cutoff}})
+    await db.consultations.delete_many({"created_at": {"$lt": cutoff}})
+
+
 @api_router.get("/consultations/mine")
 async def my_consultations(user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await purge_old_threads()
     q = {} if user["role"] in ("admin", "super_admin") else {"assigned_to": user["id"]}
     items = await db.consultations.find(q).sort("created_at", -1).to_list(500)
     return [sanitize_doc(x) for x in items]
 
 
+@api_router.get("/consultations/mine-learner")
+async def my_consultations_as_learner(user: dict = Depends(get_current_user)):
+    """A learner's own consultation requests, for the chat widget to poll for replies."""
+    items = await db.consultations.find({"email": user["email"].lower()}).sort("created_at", -1).to_list(50)
+    return [sanitize_doc(x) for x in items]
+
+
 @api_router.patch("/consultations/{cid}")
 async def update_consultation(cid: str, data: dict,
-                               user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                               user: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                               _feat: bool = Depends(require_feature("consultations"))):
     await db.consultations.update_one({"_id": ObjectId(cid)}, {"$set": data})
     await write_audit(user, "consultation.update", cid, data)
     return {"ok": True}
 
 
 # ==================== QUIZZES ====================
+def normalize_question(q: dict, idx: int = 0) -> dict:
+    """Typed question shape; normalizes legacy {q, options, correct_index} rows on read."""
+    q = dict(q)
+    if q.get("type") is None:
+        q = {
+            "id": q.get("id") or str(idx),
+            "type": "mcq",
+            "prompt": q.get("prompt", q.get("q", "")),
+            "options": q.get("options", []),
+            "correct": [q["correct_index"]] if "correct_index" in q else q.get("correct", []),
+            "points": q.get("points", 1),
+            "multiple": q.get("multiple", False),
+        }
+    q.setdefault("id", str(idx))
+    q.setdefault("prompt", q.get("q", ""))
+    q.setdefault("points", 1)
+    q.setdefault("correct", [])
+    q.setdefault("multiple", False)
+    return q
+
+
+def strip_question_answers(q: dict) -> dict:
+    q = dict(q)
+    q.pop("correct", None)
+    return q
+
+
+def rank_leaderboard(rows: List[dict]) -> List[dict]:
+    """Sorts attempt rows by highest total_score, then fastest time_taken_seconds
+    (missing times rank last among equal scores), and assigns 1-based rank."""
+    rows = sorted(rows, key=lambda r: (-(r.get("total_score") or 0),
+                  r["time_taken_seconds"] if r.get("time_taken_seconds") is not None else float("inf")))
+    for i, r in enumerate(rows):
+        r["rank"] = i + 1
+    return rows
+
+
+def auto_grade_mcq(questions: List[dict], answers: List[Any]):
+    """Grades only type=='mcq' questions; returns (correct_count, points_scored)."""
+    correct = 0
+    points_scored = 0
+    for i, question in enumerate(questions):
+        if question.get("type") == "paragraph":
+            continue
+        ans = answers[i] if i < len(answers) else None
+        points = question.get("points", 1) or 1
+        expected = question.get("correct", [])
+        if question.get("multiple"):
+            given = set(ans) if isinstance(ans, list) else set()
+            is_correct = bool(expected) and given == set(expected)
+        else:
+            given = ans[0] if isinstance(ans, list) and ans else ans
+            is_correct = bool(expected) and given in expected
+        if is_correct:
+            correct += 1
+            points_scored += points
+    return correct, points_scored
+
+
 @api_router.post("/quizzes")
 async def create_quiz(data: QuizIn,
                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await check_feature_enabled(quiz_feature_key(data.context))
+    await check_quiz_capability(actor, data.context)
+    if data.context == "course" and not (data.offering_id or "").strip():
+        raise HTTPException(400, "offering_id is required for a course-context quiz")
     doc = data.model_dump()
+    doc["offering_id"] = (doc.get("offering_id") or "").strip() or None
+    doc["festival_id"] = (doc.get("festival_id") or "").strip() or None
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
+    doc["status"] = "published"
     r = await db.quizzes.insert_one(doc)
     doc["_id"] = r.inserted_id
+    await write_audit(actor, "quiz.create", str(r.inserted_id), {"title": data.title, "context": data.context})
     return sanitize_doc(doc)
 
 
+@api_router.get("/quizzes")
+async def list_all_quizzes(context: Optional[str] = None, offering_id: Optional[str] = None,
+                            status: Optional[str] = None,
+                            actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Staff's own quizzes (academic_staff) or all quizzes (admin/super_admin), with optional filters."""
+    if context:
+        await check_feature_enabled(quiz_feature_key(context))
+        await check_quiz_capability(actor, context)
+    q = {}
+    if context: q["context"] = context
+    if offering_id: q["offering_id"] = offering_id
+    if status: q["status"] = status
+    if actor["role"] == "academic_staff":
+        q["created_by"] = actor["id"]
+    items = await db.quizzes.find(q).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.get("/quizzes/events")
+async def list_event_quizzes(_feat: bool = Depends(require_feature("quizzes"))):
+    """Published, event-context quizzes whose window hasn't expired — feeds the public Events page."""
+    items = await db.quizzes.find({"context": "event", "status": "published"}).to_list(500)
+    now = now_utc().isoformat()
+    items = [x for x in items if not (x.get("ends_at") or "").strip() or x["ends_at"] > now]
+    items.sort(key=lambda x: x.get("starts_at") or "")
+    items = [sanitize_doc(x) for x in items]
+    for it in items:
+        it["questions"] = [strip_question_answers(normalize_question(x, i))
+                            for i, x in enumerate(it.get("questions", []))]
+    return items
+
+
 @api_router.get("/quizzes/offering/{offering_id}")
-async def list_quizzes(offering_id: str):
+async def list_quizzes(offering_id: str, _feat: bool = Depends(require_feature("quizzes"))):
     items = await db.quizzes.find({"offering_id": offering_id}).to_list(50)
     return [sanitize_doc(x) for x in items]
 
@@ -791,10 +1012,97 @@ async def get_quiz(quiz_id: str):
     q = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
     if not q:
         raise HTTPException(404, "Quiz not found")
+    await check_feature_enabled(quiz_feature_key(q.get("context", "event")))
     q = sanitize_doc(q)
-    # strip correct_index for learners
-    q["questions"] = [{"q": x["q"], "options": x["options"]} for x in q.get("questions", [])]
+    # strip correct answers for learners
+    q["questions"] = [strip_question_answers(normalize_question(x, i))
+                       for i, x in enumerate(q.get("questions", []))]
     return q
+
+
+@api_router.patch("/quizzes/{quiz_id}")
+async def update_quiz(quiz_id: str, data: dict,
+                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    data.pop("id", None); data.pop("_id", None)
+    existing = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
+    if not existing:
+        raise HTTPException(404, "Quiz not found")
+    context = data.get("context", existing.get("context", "event"))
+    await check_feature_enabled(quiz_feature_key(context))
+    await check_quiz_capability(actor, context)
+    if context == "course":
+        offering_id = data.get("offering_id", existing.get("offering_id"))
+        if not (offering_id or "").strip():
+            raise HTTPException(400, "offering_id is required for a course-context quiz")
+    if data:
+        await db.quizzes.update_one({"_id": ObjectId(quiz_id)}, {"$set": data})
+    await write_audit(actor, "quiz.update", quiz_id, data)
+    q = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
+    return sanitize_doc(q)
+
+
+@api_router.delete("/quizzes/{quiz_id}")
+async def delete_quiz(quiz_id: str,
+                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    existing = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
+    if not existing:
+        raise HTTPException(404, "Quiz not found")
+    await check_feature_enabled(quiz_feature_key(existing.get("context", "event")))
+    await check_quiz_capability(actor, existing.get("context", "event"))
+    await db.quizzes.delete_one({"_id": ObjectId(quiz_id)})
+    await db.live_sessions.delete_one({"kind": "quiz", "quiz_id": quiz_id})
+    await write_audit(actor, "quiz.delete", quiz_id, {})
+    return {"ok": True}
+
+
+@api_router.post("/quizzes/{quiz_id}/link-event")
+async def link_quiz_event(quiz_id: str, data: QuizLinkEventIn,
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                          _feat: bool = Depends(require_feature("quizzes"))):
+    quiz = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
+    if not quiz:
+        raise HTTPException(404, "Quiz not found")
+    if data.auto_create:
+        acharya_id = actor["id"]
+        if quiz.get("offering_id"):
+            o = await db.offerings.find_one({"_id": ObjectId(quiz["offering_id"])})
+            if o and o.get("acharya_id"):
+                acharya_id = o["acharya_id"]
+        a = await db.users.find_one({"_id": ObjectId(acharya_id)}) if acharya_id else None
+        doc = {
+            "title": quiz.get("title", ""), "offering_id": None,
+            "acharya_id": acharya_id, "acharya_name": a.get("name", "") if a else "",
+            "starts_at": data.starts_at or now_utc().isoformat(),
+            "duration_min": 60, "mode": "interactive", "join_url": "", "topic": "",
+            "kind": "quiz", "quiz_id": quiz_id,
+            "created_at": now_utc().isoformat(), "created_by": actor["id"],
+        }
+        r = await db.live_sessions.insert_one(doc)
+        session_id = str(r.inserted_id)
+    elif (data.live_session_id or "").strip():
+        session_id = data.live_session_id
+        await db.live_sessions.update_one({"_id": ObjectId(session_id)},
+            {"$set": {"kind": "quiz", "quiz_id": quiz_id}})
+    else:
+        raise HTTPException(400, "Provide live_session_id or auto_create=true")
+    await write_audit(actor, "quiz.link_event", quiz_id, {"live_session_id": session_id})
+    return {"ok": True, "live_session_id": session_id}
+
+
+@api_router.get("/offerings/{offering_id}/assessment")
+async def get_offering_assessment(offering_id: str, user: dict = Depends(get_current_user)):
+    await check_feature_enabled("assessments")
+    quiz = await db.quizzes.find_one(
+        {"offering_id": offering_id, "context": "course", "status": "published"})
+    if not quiz:
+        raise HTTPException(404, "No assessment for this course")
+    e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
+    if not e or e.get("status") != "completed":
+        return {"locked": True}
+    quiz = sanitize_doc(quiz)
+    quiz["questions"] = [strip_question_answers(normalize_question(x, i))
+                          for i, x in enumerate(quiz.get("questions", []))]
+    return quiz
 
 
 @api_router.post("/quizzes/attempts")
@@ -802,20 +1110,97 @@ async def submit_attempt(data: QuizAttemptIn, user: dict = Depends(get_current_u
     q = await db.quizzes.find_one({"_id": ObjectId(data.quiz_id)})
     if not q:
         raise HTTPException(404, "Quiz not found")
-    questions = q.get("questions", [])
-    correct = 0
-    for i, ans in enumerate(data.answers):
-        if i < len(questions) and questions[i].get("correct_index") == ans:
-            correct += 1
-    score = round((correct / max(len(questions), 1)) * 100)
+    await check_feature_enabled(quiz_feature_key(q.get("context", "event")))
+    questions = [normalize_question(x, i) for i, x in enumerate(q.get("questions", []))]
+    correct, points_scored = auto_grade_mcq(questions, data.answers)
+    has_paragraph = any(x.get("type") == "paragraph" for x in questions)
+    status = "submitted" if has_paragraph else "graded"
+    possible = sum((x.get("points", 1) or 1) for x in questions if x.get("type") != "paragraph")
+    score = round((points_scored / possible) * 100) if (possible and not has_paragraph) else 0
     doc = {
         "quiz_id": data.quiz_id, "user_id": user["id"], "answers": data.answers,
         "score": score, "correct": correct, "total": len(questions),
-        "submitted_at": now_utc().isoformat(), "graded": True,
+        "submitted_at": now_utc().isoformat(), "graded": status == "graded",
+        "status": status, "total_score": points_scored,
+        "started_at": data.started_at or "", "time_taken_seconds": data.time_taken_seconds,
     }
     result = await db.quiz_attempts.insert_one(doc)
     doc["_id"] = result.inserted_id
     return sanitize_doc(doc)
+
+
+@api_router.get("/quizzes/{quiz_id}/my-attempt")
+async def my_quiz_attempt(quiz_id: str, user: dict = Depends(get_current_user)):
+    """Learner's own latest attempt on this quiz (cross-device attempt-status check)."""
+    q = await db.quizzes.find_one({"_id": ObjectId(quiz_id)})
+    if q:
+        await check_feature_enabled(quiz_feature_key(q.get("context", "event")))
+    items = await db.quiz_attempts.find(
+        {"quiz_id": quiz_id, "user_id": user["id"]}).sort("submitted_at", -1).to_list(1)
+    if not items:
+        raise HTTPException(404, "No attempt yet")
+    a = items[0]
+    return {"status": a.get("status"), "score": a.get("score"), "correct": a.get("correct"),
+            "total": a.get("total"), "total_score": a.get("total_score")}
+
+
+@api_router.get("/quizzes/{quiz_id}/attempts")
+async def list_quiz_attempts(quiz_id: str, status: Optional[str] = None,
+                             actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                             _feat: bool = Depends(require_feature("grading"))):
+    if not await has_capability(actor["id"], "grader"):
+        raise HTTPException(403, "Requires the 'grader' capability")
+    q = {"quiz_id": quiz_id}
+    if status: q["status"] = status
+    items = await db.quiz_attempts.find(q).to_list(500)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.post("/attempts/{attempt_id}/grade")
+async def grade_attempt(attempt_id: str, data: AttemptGradeIn,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("grading"))):
+    if not await has_capability(actor["id"], "grader"):
+        raise HTTPException(403, "Requires the 'grader' capability")
+    attempt = await db.quiz_attempts.find_one({"_id": ObjectId(attempt_id)})
+    if not attempt:
+        raise HTTPException(404, "Attempt not found")
+    quiz = await db.quizzes.find_one({"_id": ObjectId(attempt["quiz_id"])})
+    questions = [normalize_question(x, i) for i, x in enumerate(quiz.get("questions", []) if quiz else [])]
+    _correct, auto_score = auto_grade_mcq(questions, attempt.get("answers", []))
+    manual_total = sum(int(v) for v in data.manual_scores.values())
+    total_score = auto_score + manual_total
+    await db.quiz_attempts.update_one({"_id": ObjectId(attempt_id)}, {"$set": {
+        "manual_scores": data.manual_scores, "feedback": data.feedback,
+        "total_score": total_score, "status": "graded",
+        "graded_by": actor["id"], "graded_at": now_utc().isoformat(),
+    }})
+    await write_audit(actor, "attempt.grade", attempt_id, {"total_score": total_score})
+    a = await db.quiz_attempts.find_one({"_id": ObjectId(attempt_id)})
+    return sanitize_doc(a)
+
+
+@api_router.get("/quizzes/{quiz_id}/leaderboard")
+async def quiz_leaderboard(quiz_id: str,
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                           _feat: bool = Depends(require_feature("grading"))):
+    """Ranks submissions by highest score, then fastest completion time."""
+    if not await has_capability(actor["id"], "grader"):
+        raise HTTPException(403, "Requires the 'grader' capability")
+    items = await db.quiz_attempts.find({"quiz_id": quiz_id}).to_list(500)
+    rows = []
+    for a in items:
+        user = await db.users.find_one({"_id": ObjectId(a["user_id"])}) if a.get("user_id") else None
+        rows.append({
+            "attempt_id": str(a.get("_id", a.get("id"))),
+            "user_id": a.get("user_id"),
+            "user_name": user.get("name", "Unknown") if user else "Unknown",
+            "status": a.get("status"), "total_score": a.get("total_score", 0),
+            "time_taken_seconds": a.get("time_taken_seconds"),
+            "submitted_at": a.get("submitted_at"), "answers": a.get("answers", []),
+            "manual_scores": a.get("manual_scores", {}), "feedback": a.get("feedback", {}),
+        })
+    return rank_leaderboard(rows)
 
 
 # ==================== DOUBTS Q&A ====================
@@ -852,21 +1237,229 @@ async def my_doubts(user: dict = Depends(get_current_user)):
 
 @api_router.get("/doubts")
 async def list_doubts(offering_id: Optional[str] = None, status: Optional[str] = None):
+    await purge_old_threads()
     q = {}
     if offering_id: q["offering_id"] = offering_id
     if status: q["status"] = status
     items = await db.doubts.find(q).sort("created_at", -1).to_list(500)
-    return [sanitize_doc(x) for x in items]
+    result = []
+    for x in items:
+        x = sanitize_doc(x)
+        asker = await db.users.find_one({"_id": ObjectId(x["asked_by"])}) if x.get("asked_by") else None
+        x["asked_by_email"] = asker.get("email", "") if asker else ""
+        result.append(x)
+    return result
 
 
 @api_router.post("/doubts/{did}/answer")
 async def answer_doubt(did: str, data: DoubtAnswerIn,
-                        user: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                        user: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("doubts"))):
     await db.doubts.update_one({"_id": ObjectId(did)},
         {"$set": {"answer": data.answer, "answered_by": user["id"],
                   "answered_by_name": user.get("name", ""),
                   "answered_at": now_utc().isoformat(), "status": "answered"}})
     return {"ok": True}
+
+
+# ==================== QUERIES (ticketed chat — GUVI/Zen Class style) ====================
+QUERY_STAFF_ROLES = ("academic_staff", "admin", "super_admin")
+
+
+async def _hydrate_ticket(t: dict) -> dict:
+    t = sanitize_doc(t)
+    staff = await db.users.find_one({"_id": ObjectId(t["assigned_staff_id"])}) if t.get("assigned_staff_id") else None
+    t["assigned_staff_name"] = staff.get("name", "") if staff else ""
+    asker = await db.users.find_one({"_id": ObjectId(t["user_id"])}) if t.get("user_id") else None
+    t["user_name"] = asker.get("name", "") if asker else ""
+    return t
+
+
+def _check_query_access(t: dict, user: dict):
+    role = user.get("role")
+    if role in ("admin", "super_admin"):
+        return
+    if role == "academic_staff":
+        # Any staff member may preview an unclaimed ticket; once claimed it's
+        # locked to the assigned staff member (exclusivity enforcement).
+        if t.get("assigned_staff_id") and t["assigned_staff_id"] != user["id"]:
+            raise HTTPException(403, "This query has been claimed by another staff member")
+        return
+    if t.get("user_id") == user["id"]:
+        return
+    raise HTTPException(403, "Not authorized to view this query")
+
+
+@api_router.post("/queries")
+async def create_query_ticket(data: QueryTicketIn, user: dict = Depends(get_current_user),
+                               _feat: bool = Depends(require_feature("queries"))):
+    if not data.title.strip():
+        raise HTTPException(400, "Title is required")
+    now = now_utc().isoformat()
+    doc = {
+        "user_id": user["id"], "assigned_staff_id": None,
+        "title": data.title.strip(), "description": (data.description or "").strip(),
+        "category_tags": data.category_tags or [], "status": "OPEN",
+        "created_at": now, "updated_at": now,
+    }
+    r = await db.query_tickets.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    ticket = sanitize_doc(doc)
+    if doc["description"]:
+        await db.query_messages.insert_one({
+            "ticket_id": ticket["id"], "sender_id": user["id"], "sender_role": "STUDENT",
+            "message_text": doc["description"], "created_at": now,
+        })
+    await write_audit(user, "query.create", ticket["id"], {"title": data.title})
+    return await _hydrate_ticket(doc)
+
+
+@api_router.get("/queries/mine")
+async def list_my_queries(user: dict = Depends(get_current_user)):
+    items = await db.query_tickets.find({"user_id": user["id"]}).sort("updated_at", -1).to_list(500)
+    return [await _hydrate_ticket(x) for x in items]
+
+
+@api_router.get("/queries/unassigned")
+async def list_unassigned_queries(actor: dict = Depends(require_role(*QUERY_STAFF_ROLES))):
+    """The global pool every staff member sees until someone claims each ticket."""
+    items = await db.query_tickets.find({"status": "OPEN"}).sort("created_at", 1).to_list(500)
+    return [await _hydrate_ticket(x) for x in items]
+
+
+@api_router.get("/queries/assigned-to-me")
+async def list_my_assigned_queries(actor: dict = Depends(require_role(*QUERY_STAFF_ROLES))):
+    items = await db.query_tickets.find({"assigned_staff_id": actor["id"]}).sort("updated_at", -1).to_list(500)
+    return [await _hydrate_ticket(x) for x in items]
+
+
+@api_router.get("/queries/all")
+async def list_all_queries(actor: dict = Depends(require_role("admin", "super_admin"))):
+    """Admin/supervisor override — every ticket regardless of assignment."""
+    items = await db.query_tickets.find({}).sort("created_at", -1).to_list(1000)
+    return [await _hydrate_ticket(x) for x in items]
+
+
+@api_router.get("/queries/{ticket_id}")
+async def get_query_ticket(ticket_id: str, user: dict = Depends(get_current_user)):
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    t = sanitize_doc(t)
+    _check_query_access(t, user)
+    return await _hydrate_ticket(t)
+
+
+@api_router.get("/queries/{ticket_id}/messages")
+async def list_query_messages(ticket_id: str, user: dict = Depends(get_current_user)):
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    t = sanitize_doc(t)
+    _check_query_access(t, user)
+    items = await db.query_messages.find({"ticket_id": ticket_id}).sort("created_at", 1).to_list(1000)
+    return [sanitize_doc(m) for m in items]
+
+
+@api_router.post("/queries/{ticket_id}/messages")
+async def send_query_message(ticket_id: str, data: QueryMessageIn, user: dict = Depends(get_current_user)):
+    if not data.message_text.strip():
+        raise HTTPException(400, "Message text is required")
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    t = sanitize_doc(t)
+    if t["status"] == "CLOSED":
+        raise HTTPException(400, "This query is closed")
+    _check_query_access(t, user)
+    role = user.get("role")
+    now = now_utc().isoformat()
+    if role in QUERY_STAFF_ROLES and t["user_id"] != user["id"]:
+        sender_role = "STAFF"
+        if not t.get("assigned_staff_id"):
+            # First staff reply claims the ticket — exclusive to this staff member.
+            await db.query_tickets.update_one({"_id": ObjectId(ticket_id)},
+                {"$set": {"assigned_staff_id": user["id"], "status": "ASSIGNED", "updated_at": now}})
+            await write_audit(user, "query.claim", ticket_id, {})
+        elif t["assigned_staff_id"] != user["id"] and role == "academic_staff":
+            raise HTTPException(403, "This query has been claimed by another staff member")
+        else:
+            await db.query_tickets.update_one({"_id": ObjectId(ticket_id)}, {"$set": {"updated_at": now}})
+    else:
+        sender_role = "STUDENT"
+        await db.query_tickets.update_one({"_id": ObjectId(ticket_id)}, {"$set": {"updated_at": now}})
+    doc = {
+        "ticket_id": ticket_id, "sender_id": user["id"], "sender_role": sender_role,
+        "message_text": data.message_text.strip(), "created_at": now,
+    }
+    r = await db.query_messages.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return sanitize_doc(doc)
+
+
+@api_router.post("/queries/{ticket_id}/close")
+async def close_query_ticket(ticket_id: str, user: dict = Depends(get_current_user)):
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    t = sanitize_doc(t)
+    if t["status"] == "CLOSED":
+        raise HTTPException(400, "This query is already closed")
+    role = user.get("role")
+    is_owner = t["user_id"] == user["id"]
+    is_assigned_staff = t.get("assigned_staff_id") == user["id"]
+    is_admin = role in ("admin", "super_admin")
+    if not (is_owner or is_assigned_staff or is_admin):
+        raise HTTPException(403, "Not authorized to close this query")
+    now = now_utc().isoformat()
+    await db.query_tickets.update_one({"_id": ObjectId(ticket_id)},
+        {"$set": {"status": "CLOSED", "updated_at": now}})
+    closer_label = "The learner" if (is_owner and not is_assigned_staff and not is_admin) else "The mentor"
+    await db.query_messages.insert_one({
+        "ticket_id": ticket_id, "sender_id": None, "sender_role": "SYSTEM",
+        "message_text": f"{closer_label} has closed this query.", "created_at": now,
+    })
+    await write_audit(user, "query.close", ticket_id, {})
+    return {"ok": True}
+
+
+@api_router.post("/queries/{ticket_id}/reassign")
+async def reassign_query_ticket(ticket_id: str, data: QueryReassignIn,
+                                 actor: dict = Depends(require_role("admin", "super_admin"))):
+    """Admin/supervisor override — reassign a ticket to a different staff member,
+    or clear staff_id to drop it back into the unassigned pool."""
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    staff_id = (data.staff_id or "").strip()
+    if staff_id:
+        staff = await db.users.find_one({"_id": ObjectId(staff_id)})
+        if not staff or staff.get("role") not in QUERY_STAFF_ROLES:
+            raise HTTPException(400, "Target user is not a staff member")
+    now = now_utc().isoformat()
+    await db.query_tickets.update_one({"_id": ObjectId(ticket_id)}, {"$set": {
+        "assigned_staff_id": staff_id or None, "status": "ASSIGNED" if staff_id else "OPEN",
+        "updated_at": now,
+    }})
+    await write_audit(actor, "query.reassign", ticket_id, {"staff_id": staff_id})
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    return await _hydrate_ticket(t)
+
+
+# ==================== FEATURE TOGGLES ====================
+@api_router.get("/feature-toggles")
+async def list_feature_toggles(user: dict = Depends(get_current_user)):
+    return await db.feature_toggles.find({}).to_list(50)
+
+
+@api_router.patch("/feature-toggles/{key}")
+async def update_feature_toggle(key: str, data: FeatureToggleIn,
+                                actor: dict = Depends(require_role("admin", "super_admin"))):
+    await db.feature_toggles.update_one({"key": key}, {"$set": {
+        "enabled": data.enabled, "updated_by": actor["id"], "updated_at": now_utc().isoformat(),
+    }})
+    await write_audit(actor, "feature_toggle.update", key, {"enabled": data.enabled})
+    return await db.feature_toggles.find_one({"key": key})
 
 
 # ==================== CAPABILITY GRANTS ====================
@@ -909,9 +1502,7 @@ async def upcoming_sessions(user: dict = Depends(get_current_user)):
     result = []
     for s in items:
         s = sanitize_doc(s)
-        start = datetime.fromisoformat(s["starts_at"])
-        s["can_join"] = (start - now).total_seconds() <= 300  # 5 min before
-        s["is_live"] = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
+        s["can_join"], s["is_live"] = session_join_window(s, now)
         result.append(s)
     return sorted(result, key=lambda x: x["starts_at"])
 
@@ -921,13 +1512,17 @@ async def join_session(sid: str, user: dict = Depends(get_current_user)):
     s = await db.live_sessions.find_one({"_id": ObjectId(sid)})
     if not s:
         raise HTTPException(404, "Session not found")
+    s = sanitize_doc(s)
+    can_join, _ = session_join_window(s, now_utc())
+    if not can_join:
+        raise HTTPException(403, "This session hasn't started yet. Join opens 5 minutes before start.")
     # Use the real meeting link if staff provided one; otherwise a mock placeholder.
     real = (s.get("join_url") or "").strip()
     if real:
-        return {"join_url": real, "session": sanitize_doc(s)}
+        return {"join_url": real, "session": s}
     return {
         "join_url": f"https://plugnmeet.example.com/room/{sid}?token=mock_{secrets.token_hex(8)}",
-        "session": sanitize_doc(s),
+        "session": s,
         "note": "No meeting link set — placeholder link for MVP.",
     }
 
@@ -935,7 +1530,8 @@ async def join_session(sid: str, user: dict = Depends(get_current_user)):
 # ==================== CERTIFICATES ====================
 @api_router.post("/certificates/issue")
 async def issue_certificate(payload: dict,
-                             actor: dict = Depends(require_role("admin", "super_admin", "academic_staff"))):
+                             actor: dict = Depends(require_role("admin", "super_admin", "academic_staff")),
+                             _feat: bool = Depends(require_feature("certs"))):
     user_id = payload["user_id"]
     offering_id = payload["offering_id"]
     u = await db.users.find_one({"_id": ObjectId(user_id)})
@@ -1039,6 +1635,11 @@ async def request_certificate(payload: dict, user: dict = Depends(get_current_us
     done = len(e.get("completed_lessons") or [])
     if not total or done < total:
         raise HTTPException(400, "Complete all lessons before requesting a certificate.")
+    quiz = await db.quizzes.find_one({"offering_id": offering_id, "context": "course", "status": "published"})
+    if quiz:
+        attempt = await db.quiz_attempts.find_one({"quiz_id": str(quiz["_id"]), "user_id": user["id"]})
+        if not attempt:
+            raise HTTPException(400, "Complete the course assessment before requesting a certificate.")
     if not o.get("acharya_id"):
         raise HTTPException(400, "This course has no assigned Ācharya.")
     # No duplicate active certificate/request for the same course.
@@ -1069,7 +1670,8 @@ async def certificate_requests(actor: dict = Depends(require_role("academic_staf
 
 @api_router.post("/certificates/{code}/approve-request")
 async def approve_certificate_request(code: str,
-                                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                                      actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                                      _feat: bool = Depends(require_feature("certs"))):
     c = await db.certificates.find_one({"code": code})
     if not c:
         raise HTTPException(404, "Certificate not found")
@@ -1180,17 +1782,90 @@ async def payment_webhook_mock(payload: dict):
     return {"ok": True}
 
 
-# ==================== FESTIVAL CALENDAR ====================
+# ==================== FESTIVAL CALENDAR (staff-managed, CSV-fed) ====================
 @api_router.get("/festivals")
 async def list_festivals():
-    """Auto-computed Vedic festival calendar (tithi-based, Swiss Ephemeris).
-    Returns the next occurrences from today so dates advance every year."""
+    """Staff-managed festival calendar (CSV-imported / hand-entered), sorted chronologically.
+    Falls back to the auto-computed Vedic (tithi-based) calendar only if nothing has been
+    entered yet, so a stable set of ids exists for quizzes to attach to via festival_id."""
+    items = await db.festivals.find({}).to_list(500)
+    if items:
+        items = [sanitize_doc(f) for f in items]
+        items.sort(key=lambda f: f.get("date") or "")
+        return items
     try:
         return panchang.upcoming_festivals(count=12)
     except Exception as e:
-        logger.warning(f"Panchang computation failed, falling back to stored festivals: {e}")
-        items = await db.festivals.find({}).to_list(100)
-        return [sanitize_doc(f) for f in items]
+        logger.warning(f"Panchang computation failed and no stored festivals exist: {e}")
+        return []
+
+
+@api_router.post("/festivals")
+async def create_festival(data: FestivalIn,
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    doc = data.model_dump()
+    r = await db.festivals.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "festival.create", str(r.inserted_id), {"name": data.name, "date": data.date})
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/festivals/{festival_id}")
+async def update_festival(festival_id: str, data: dict,
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    data.pop("id", None); data.pop("_id", None)
+    if data:
+        await db.festivals.update_one({"_id": ObjectId(festival_id)}, {"$set": data})
+    await write_audit(actor, "festival.update", festival_id, data)
+    f = await db.festivals.find_one({"_id": ObjectId(festival_id)})
+    if not f:
+        raise HTTPException(404, "Festival not found")
+    return sanitize_doc(f)
+
+
+@api_router.delete("/festivals/{festival_id}")
+async def delete_festival(festival_id: str,
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.festivals.delete_one({"_id": ObjectId(festival_id)})
+    await write_audit(actor, "festival.delete", festival_id, {})
+    return {"ok": True}
+
+
+@api_router.post("/festivals/import-csv")
+async def import_festivals_csv(data: FestivalCsvImportIn,
+                                actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """CSV columns: name, date (YYYY-MM-DD), significance, deity, related_offering_subject.
+    'replace' mode clears the calendar first; 'append' upserts by (name, date)."""
+    reader = csv.DictReader(io.StringIO(data.csv_text))
+    rows = []
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        date = (row.get("date") or "").strip()
+        if not name or not date:
+            continue
+        rows.append({
+            "name": name, "date": date,
+            "significance": (row.get("significance") or "").strip(),
+            "deity": (row.get("deity") or "").strip(),
+            "related_offering_subject": (row.get("related_offering_subject") or "").strip(),
+        })
+    if not rows:
+        raise HTTPException(400, "No valid rows found — expected columns: name, date, significance, deity, related_offering_subject")
+    if data.mode == "replace":
+        await db.festivals.delete_many({})
+        await db.festivals.insert_many(rows)
+    else:
+        for row in rows:
+            existing = await db.festivals.find_one({"name": row["name"], "date": row["date"]})
+            if existing:
+                await db.festivals.update_one({"_id": existing["_id"]}, {"$set": row})
+            else:
+                await db.festivals.insert_one(row)
+    await write_audit(actor, "festival.import_csv", "", {"mode": data.mode, "count": len(rows)})
+    items = await db.festivals.find({}).to_list(500)
+    items = [sanitize_doc(f) for f in items]
+    items.sort(key=lambda f: f.get("date") or "")
+    return items
 
 
 # ==================== MANTRAS (by deity, linked to the festival calendar) ====================
@@ -1205,7 +1880,8 @@ async def list_mantras(deity: Optional[str] = None):
 
 @api_router.post("/mantras")
 async def create_mantra(data: MantraIn,
-                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("mantras"))):
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
@@ -1228,7 +1904,8 @@ async def update_mantra(mid: str, data: dict,
 
 @api_router.delete("/mantras/{mid}")
 async def delete_mantra(mid: str,
-                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("mantras"))):
     await db.mantras.delete_one({"_id": ObjectId(mid)})
     await write_audit(actor, "mantra.delete", mid, {})
     return {"ok": True}
@@ -1242,6 +1919,50 @@ async def list_blogs(category: Optional[str] = None, limit: int = 50):
         q["category"] = category
     items = await db.blogs.find(q).sort("created_at", -1).limit(limit).to_list(limit)
     return [sanitize_doc(b) for b in items]
+
+
+@api_router.post("/blogs")
+async def create_blog(data: BlogIn,
+                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                       _feat: bool = Depends(require_feature("journal"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "journal_author"):
+        raise HTTPException(403, "Journal authoring has not been granted to you by admin — ask an admin to grant the 'journal_author' capability.")
+    if await db.blogs.find_one({"slug": data.slug}):
+        raise HTTPException(400, "A journal entry with this slug already exists")
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.blogs.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "blog.create", str(r.inserted_id), {"title": data.title})
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/blogs/{blog_id}")
+async def update_blog(blog_id: str, data: dict,
+                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                       _feat: bool = Depends(require_feature("journal"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "journal_author"):
+        raise HTTPException(403, "Journal authoring has not been granted to you by admin — ask an admin to grant the 'journal_author' capability.")
+    data.pop("id", None); data.pop("_id", None)
+    if data:
+        await db.blogs.update_one({"_id": ObjectId(blog_id)}, {"$set": data})
+    await write_audit(actor, "blog.update", blog_id, data)
+    b = await db.blogs.find_one({"_id": ObjectId(blog_id)})
+    if not b:
+        raise HTTPException(404, "Journal entry not found")
+    return sanitize_doc(b)
+
+
+@api_router.delete("/blogs/{blog_id}")
+async def delete_blog(blog_id: str,
+                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                       _feat: bool = Depends(require_feature("journal"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "journal_author"):
+        raise HTTPException(403, "Journal authoring has not been granted to you by admin — ask an admin to grant the 'journal_author' capability.")
+    await db.blogs.delete_one({"_id": ObjectId(blog_id)})
+    await write_audit(actor, "blog.delete", blog_id, {})
+    return {"ok": True}
 
 
 @api_router.get("/blogs/{slug}")
@@ -1278,6 +1999,39 @@ async def list_mentors():
     """Public mentor showcase — expanded acharya profiles."""
     items = await db.mentors.find({}).sort("order", 1).to_list(50)
     return [sanitize_doc(m) for m in items]
+
+
+@api_router.post("/mentors")
+async def create_mentor(data: MentorIn,
+                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.mentors.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "mentor.create", str(r.inserted_id), {"name": data.name})
+    return sanitize_doc(doc)
+
+
+@api_router.patch("/mentors/{mentor_id}")
+async def update_mentor(mentor_id: str, data: dict,
+                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    data.pop("id", None); data.pop("_id", None)
+    if data:
+        await db.mentors.update_one({"_id": ObjectId(mentor_id)}, {"$set": data})
+    await write_audit(actor, "mentor.update", mentor_id, data)
+    m = await db.mentors.find_one({"_id": ObjectId(mentor_id)})
+    if not m:
+        raise HTTPException(404, "Mentor not found")
+    return sanitize_doc(m)
+
+
+@api_router.delete("/mentors/{mentor_id}")
+async def delete_mentor(mentor_id: str,
+                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    await db.mentors.delete_one({"_id": ObjectId(mentor_id)})
+    await write_audit(actor, "mentor.delete", mentor_id, {})
+    return {"ok": True}
 
 
 # ==================== TESTIMONIALS ====================
@@ -1429,10 +2183,15 @@ async def review_acharya_content(cid: str, data: AcharyaContentReviewIn,
 # ==================== LIVE SESSIONS — CREATE (staff schedules for acharyas) ====================
 @api_router.post("/live-sessions")
 async def create_live_session(data: LiveSessionCreateIn,
-                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                               _feat: bool = Depends(require_feature("sessions"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "session_author"):
+        raise HTTPException(403, "Session scheduling has not been granted to you by admin — ask an admin to grant the 'session_author' capability.")
+    if not (data.offering_id or "").strip():
+        raise HTTPException(400, "A course must be selected — live sessions are course-bound.")
     a = await db.users.find_one({"_id": ObjectId(data.acharya_id)}) if data.acharya_id else None
     doc = data.model_dump()
-    doc["offering_id"] = (doc.get("offering_id") or "").strip() or None  # standalone if blank
+    doc["offering_id"] = doc["offering_id"].strip()
     doc["acharya_name"] = a.get("name", "") if a else ""
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
@@ -1444,7 +2203,10 @@ async def create_live_session(data: LiveSessionCreateIn,
 
 @api_router.patch("/live-sessions/{sid}")
 async def update_live_session(sid: str, data: LiveSessionUpdateIn,
-                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                               _feat: bool = Depends(require_feature("sessions"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "session_author"):
+        raise HTTPException(403, "Session scheduling has not been granted to you by admin — ask an admin to grant the 'session_author' capability.")
     s = await db.live_sessions.find_one({"_id": ObjectId(sid)})
     if not s:
         raise HTTPException(404, "Session not found")
@@ -1463,10 +2225,24 @@ async def update_live_session(sid: str, data: LiveSessionUpdateIn,
 
 @api_router.delete("/live-sessions/{sid}")
 async def delete_live_session(sid: str,
-                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                               _feat: bool = Depends(require_feature("sessions"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "session_author"):
+        raise HTTPException(403, "Session scheduling has not been granted to you by admin — ask an admin to grant the 'session_author' capability.")
     await db.live_sessions.delete_one({"_id": ObjectId(sid)})
     await write_audit(actor, "live_session.delete", sid, {})
     return {"ok": True}
+
+
+def session_join_window(s: dict, now: datetime):
+    """(can_join, is_live) — join opens 5 min before start, closes at start + duration."""
+    try:
+        start = datetime.fromisoformat(s["starts_at"])
+    except Exception:
+        return False, False
+    can_join = (start - now).total_seconds() <= 300
+    is_live = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
+    return can_join, is_live
 
 
 @api_router.get("/live-sessions")
@@ -1476,7 +2252,13 @@ async def list_live_sessions(acharya_id: Optional[str] = None,
     if acharya_id: q["acharya_id"] = acharya_id
     if offering_id: q["offering_id"] = offering_id
     items = await db.live_sessions.find(q).sort("starts_at", 1).to_list(500)
-    return [sanitize_doc(x) for x in items]
+    now = now_utc()
+    result = []
+    for x in items:
+        x = sanitize_doc(x)
+        x["can_join"], x["is_live"] = session_join_window(x, now)
+        result.append(x)
+    return result
 
 
 @api_router.get("/live-sessions/mine-acharya")
@@ -1487,12 +2269,7 @@ async def acharya_live_sessions(user: dict = Depends(require_role("acharya"))):
     result = []
     for s in items:
         s = sanitize_doc(s)
-        try:
-            start = datetime.fromisoformat(s["starts_at"])
-            s["can_join"] = (start - now).total_seconds() <= 300
-            s["is_live"] = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
-        except Exception:
-            s["can_join"] = False; s["is_live"] = False
+        s["can_join"], s["is_live"] = session_join_window(s, now)
         try:
             o = await db.offerings.find_one({"_id": ObjectId(s.get("offering_id",""))})
             if o: s["offering_title"] = o.get("title", "")
@@ -1515,12 +2292,7 @@ async def learner_live_sessions(user: dict = Depends(get_current_user)):
     result = []
     for s in items:
         s = sanitize_doc(s)
-        try:
-            start = datetime.fromisoformat(s["starts_at"])
-            s["can_join"] = (start - now).total_seconds() <= 300
-            s["is_live"] = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
-        except Exception:
-            s["can_join"] = False; s["is_live"] = False
+        s["can_join"], s["is_live"] = session_join_window(s, now)
         try:
             o = await db.offerings.find_one({"_id": ObjectId(s.get("offering_id",""))})
             if o: s["offering_title"] = o.get("title", "")
@@ -1533,7 +2305,8 @@ async def learner_live_sessions(user: dict = Depends(get_current_user)):
 # ==================== WEBINARS — CREATE (staff) ====================
 @api_router.post("/webinars")
 async def create_webinar(data: WebinarCreateIn,
-                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                          _feat: bool = Depends(require_feature("webinars"))):
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
@@ -1545,7 +2318,8 @@ async def create_webinar(data: WebinarCreateIn,
 
 @api_router.patch("/webinars/{wid}")
 async def update_webinar(wid: str, data: dict,
-                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                          _feat: bool = Depends(require_feature("webinars"))):
     data.pop("id", None); data.pop("_id", None)
     if data:
         await db.webinars.update_one({"_id": ObjectId(wid)}, {"$set": data})
@@ -1556,7 +2330,8 @@ async def update_webinar(wid: str, data: dict,
 
 @api_router.delete("/webinars/{wid}")
 async def delete_webinar(wid: str,
-                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                          actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                          _feat: bool = Depends(require_feature("webinars"))):
     await db.webinars.delete_one({"_id": ObjectId(wid)})
     await write_audit(actor, "webinar.delete", wid, {})
     return {"ok": True}
@@ -1735,9 +2510,8 @@ async def seed_admin_and_data():
     acharya = await db.users.find_one({"email": acharya_email})
     acharya_id = str(acharya["_id"]) if acharya else ""
 
-    # Seed verses if none
-    if await db.verses.count_documents({}) == 0:
-        verses = [
+    # Seed verses — add only ones not already present, so re-runs pick up new additions
+    verses = [
             {
                 "scripture": "Bhagavad Gita", "reference": "2.47",
                 "devanagari": "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
@@ -1839,11 +2613,106 @@ async def seed_admin_and_data():
                 ],
                 "audio_url": "",
             },
-        ]
-        for v in verses:
+            {
+                "scripture": "Bhagavad Gita", "reference": "4.7-4.8",
+                "devanagari": "यदा यदा हि धर्मस्य ग्लानिर्भवति भारत।\nअभ्युत्थानमधर्मस्य तदात्मानं सृजाम्यहम्॥\nपरित्राणाय साधूनां विनाशाय च दुष्कृताम्।\nधर्मसंस्थापनार्थाय सम्भवामि युगे युगे॥",
+                "iast": "yadā yadā hi dharmasya glānir bhavati bhārata |\nabhyutthānam adharmasya tadātmānaṃ sṛjāmy aham ||\nparitrāṇāya sādhūnāṃ vināśāya ca duṣkṛtām |\ndharma-saṃsthāpanārthāya sambhavāmi yuge yuge ||",
+                "word_by_word": [
+                    {"sanskrit":"यदा यदा","iast":"yadā yadā","meaning":"whenever"},
+                    {"sanskrit":"धर्मस्य","iast":"dharmasya","meaning":"of dharma"},
+                    {"sanskrit":"ग्लानिः","iast":"glāniḥ","meaning":"decline"},
+                    {"sanskrit":"अभ्युत्थानम्","iast":"abhyutthānam","meaning":"rise"},
+                    {"sanskrit":"सृजाम्यहम्","iast":"sṛjāmy aham","meaning":"I manifest Myself"},
+                    {"sanskrit":"परित्राणाय","iast":"paritrāṇāya","meaning":"for the protection"},
+                    {"sanskrit":"साधूनाम्","iast":"sādhūnām","meaning":"of the virtuous"},
+                    {"sanskrit":"विनाशाय","iast":"vināśāya","meaning":"for the destruction"},
+                    {"sanskrit":"दुष्कृताम्","iast":"duṣkṛtām","meaning":"of the wicked"},
+                    {"sanskrit":"युगे युगे","iast":"yuge yuge","meaning":"age after age"},
+                ],
+                "translations": [
+                    {"author":"Swami Chinmayananda","text":"Whenever there is a decline of righteousness and rise of unrighteousness, O Bharata, then I manifest Myself. For the protection of the good, for the destruction of the wicked, and for the establishment of dharma, I am born in every age."},
+                    {"author":"Eknath Easwaran","text":"Whenever dharma declines and the purpose of life is forgotten, I manifest myself on earth. I am born in every age to protect the good, to destroy evil, and to reestablish dharma."},
+                ],
+                "commentaries": [
+                    {"author":"Śaṅkara","text":"The Lord's avatāra is not bound by karma like an ordinary birth — it is a voluntary manifestation for the restoration of dharma."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Rigveda", "reference": "3.62.10 (Gāyatrī Mantra)",
+                "devanagari": "ॐ भूर्भुवः स्वः।\nतत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि।\nधियो यो नः प्रचोदयात्॥",
+                "iast": "oṃ bhūr bhuvaḥ svaḥ |\ntat savitur vareṇyaṃ bhargo devasya dhīmahi |\ndhiyo yo naḥ pracodayāt ||",
+                "word_by_word": [
+                    {"sanskrit":"ॐ भूर्भुवः स्वः","iast":"oṃ bhūr bhuvaḥ svaḥ","meaning":"the primal sound and the three worlds"},
+                    {"sanskrit":"तत्","iast":"tat","meaning":"that"},
+                    {"sanskrit":"सवितुः","iast":"savituḥ","meaning":"of the divine Sun"},
+                    {"sanskrit":"वरेण्यम्","iast":"vareṇyam","meaning":"most excellent, adorable"},
+                    {"sanskrit":"भर्गः","iast":"bhargaḥ","meaning":"radiance, glory"},
+                    {"sanskrit":"धीमहि","iast":"dhīmahi","meaning":"we meditate upon"},
+                    {"sanskrit":"धियः","iast":"dhiyaḥ","meaning":"our intellects"},
+                    {"sanskrit":"प्रचोदयात्","iast":"pracodayāt","meaning":"may it inspire/illumine"},
+                ],
+                "translations": [
+                    {"author":"Swami Vivekananda","text":"We meditate on the glory of that Being who has produced this universe; may He enlighten our minds."},
+                    {"author":"Sri Aurobindo","text":"Let us meditate on the excellent glory of the divine Vivifying Sun, so that he may inspire our understandings."},
+                ],
+                "commentaries": [
+                    {"author":"Traditional","text":"The most sacred mantra of the Rigveda, recited at sandhyā (dawn/dusk worship) as an invocation for clarity of intellect."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Katha Upanishad", "reference": "1.3.14",
+                "devanagari": "उत्तिष्ठत जाग्रत प्राप्य वरान्निबोधत।\nक्षुरस्य धारा निशिता दुरत्यया दुर्गं पथस्तत्कवयो वदन्ति॥",
+                "iast": "uttiṣṭhata jāgrata prāpya varān nibodhata |\nkṣurasya dhārā niśitā duratyayā durgaṃ pathas tat kavayo vadanti ||",
+                "word_by_word": [
+                    {"sanskrit":"उत्तिष्ठत","iast":"uttiṣṭhata","meaning":"arise"},
+                    {"sanskrit":"जाग्रत","iast":"jāgrata","meaning":"awake"},
+                    {"sanskrit":"प्राप्य","iast":"prāpya","meaning":"having approached"},
+                    {"sanskrit":"वरान्","iast":"varān","meaning":"the wise/excellent teachers"},
+                    {"sanskrit":"निबोधत","iast":"nibodhata","meaning":"learn, understand"},
+                    {"sanskrit":"क्षुरस्य धारा","iast":"kṣurasya dhārā","meaning":"the edge of a razor"},
+                    {"sanskrit":"दुरत्यया","iast":"duratyayā","meaning":"difficult to cross"},
+                ],
+                "translations": [
+                    {"author":"Swami Nikhilananda","text":"Arise! Awake! Approach the great and learn. Like the sharp edge of a razor is that path, so the wise say — hard to tread and difficult to cross."},
+                    {"author":"Eknath Easwaran","text":"Awake, arise, seek the wise and learn. Like the sharp edge of a razor is that path, so hard to tread, difficult to cross, say the illumined sages."},
+                ],
+                "commentaries": [
+                    {"author":"Śaṅkara","text":"The call to awaken from ignorance is directed at the seeker, Naciketas — spiritual discipline demands vigilance, not passive belief."},
+                ],
+                "audio_url": "",
+            },
+            {
+                "scripture": "Mundaka Upanishad", "reference": "3.1.6",
+                "devanagari": "सत्यमेव जयते नानृतं सत्येन पन्था विततो देवयानः।\nयेनाक्रमन्त्यृषयो ह्याप्तकामा यत्र तत् सत्यस्य परमं निधानम्॥",
+                "iast": "satyam eva jayate nānṛtaṃ satyena panthā vitato devayānaḥ |\nyenākramanty ṛṣayo hy āptakāmā yatra tat satyasya paramaṃ nidhānam ||",
+                "word_by_word": [
+                    {"sanskrit":"सत्यम् एव","iast":"satyam eva","meaning":"truth alone"},
+                    {"sanskrit":"जयते","iast":"jayate","meaning":"triumphs"},
+                    {"sanskrit":"न अनृतम्","iast":"na anṛtam","meaning":"not falsehood"},
+                    {"sanskrit":"सत्येन","iast":"satyena","meaning":"by truth"},
+                    {"sanskrit":"पन्था","iast":"panthāḥ","meaning":"the path"},
+                    {"sanskrit":"देवयानः","iast":"devayānaḥ","meaning":"the way of the gods"},
+                    {"sanskrit":"ऋषयः","iast":"ṛṣayaḥ","meaning":"the sages"},
+                    {"sanskrit":"सत्यस्य परमं निधानम्","iast":"satyasya paramaṃ nidhānam","meaning":"the highest treasure of truth"},
+                ],
+                "translations": [
+                    {"author":"Traditional","text":"Truth alone triumphs, not falsehood. Through truth the divine path is spread out, by which the sages, whose desires are fulfilled, reach the supreme abode of truth."},
+                ],
+                "commentaries": [
+                    {"author":"Traditional","text":"Adopted as India's national motto, inscribed below the Lion Capital of Ashoka — truth as the foundation of dharma."},
+                ],
+                "audio_url": "",
+            },
+    ]
+    existing_refs = {(v["scripture"], v["reference"]) async for v in db.verses.find({}, {"scripture": 1, "reference": 1})}
+    new_verses = [v for v in verses if (v["scripture"], v["reference"]) not in existing_refs]
+    if new_verses:
+        for v in new_verses:
             v["created_at"] = now_utc().isoformat()
-        await db.verses.insert_many(verses)
-        logger.info("Seeded verses")
+        await db.verses.insert_many(new_verses)
+        logger.info(f"Seeded {len(new_verses)} verses")
 
     verse_docs = await db.verses.find({}).to_list(20)
     verse_ids = [str(v["_id"]) for v in verse_docs]
@@ -1955,15 +2824,38 @@ async def seed_admin_and_data():
              "duration_min": 60, "mode":"broadcast"},
         ])
 
-    # Festival calendar
-    if await db.festivals.count_documents({}) == 0:
-        await db.festivals.insert_many([
-            {"name":"Maha Shivaratri","date":"2026-02-15","significance":"Night of Shiva — ideal for Rudram sadhana","related_offering_subject":"Mantras","deity":"Shiva"},
-            {"name":"Vasant Panchami","date":"2026-01-22","significance":"Beginning of spring — Saraswati puja, launch of Sanskrit studies","related_offering_subject":"Sanskrit","deity":"Saraswati"},
-            {"name":"Gita Jayanti","date":"2026-11-30","significance":"Birthday of the Bhagavad Gita","related_offering_subject":"Bhagavad Gita","deity":"Krishna"},
-            {"name":"Navratri","date":"2026-10-01","significance":"Nine-night Devi sadhana","related_offering_subject":"Mantras","deity":"Durga"},
-            {"name":"Guru Purnima","date":"2026-07-19","significance":"Full moon of the teacher","related_offering_subject":"Vedas","deity":"Guru"},
-        ])
+    # Festival calendar — one-time correction of early placeholder demo dates (wrong year-half),
+    # plus the researched Aug–Dec 2026 dataset. Runs every startup but is idempotent: it only
+    # deletes the exact known-stale (name, date) pairs and only inserts a curated row if that
+    # exact (name, date) isn't already present, so staff CSV edits made afterward are untouched.
+    STALE_DEMO_FESTIVALS = [
+        ("Maha Shivaratri", "2026-02-15"), ("Vasant Panchami", "2026-01-22"),
+        ("Gita Jayanti", "2026-11-30"), ("Navratri", "2026-10-01"), ("Guru Purnima", "2026-07-19"),
+    ]
+    for stale_name, stale_date in STALE_DEMO_FESTIVALS:
+        await db.festivals.delete_many({"name": stale_name, "date": stale_date})
+
+    CURATED_FESTIVALS_2026_H2 = [
+        {"name": "Onam (Thiruvonam)", "date": "2026-08-26", "significance": "Kerala's harvest festival, celebrating the mythical return of King Mahabali", "deity": "", "related_offering_subject": ""},
+        {"name": "Raksha Bandhan", "date": "2026-08-28", "significance": "Siblings tie a protective thread, celebrating the bond of sibling love", "deity": "", "related_offering_subject": ""},
+        {"name": "Janmashtami", "date": "2026-09-04", "significance": "Birth of Lord Krishna", "deity": "Krishna", "related_offering_subject": "Bhagavad Gita"},
+        {"name": "Ganesh Chaturthi", "date": "2026-09-14", "significance": "Installation and worship of Lord Ganesha, culminating in visarjan", "deity": "Ganesha", "related_offering_subject": "Mantras"},
+        {"name": "Sharad Navratri", "date": "2026-10-11", "significance": "Nine nights honoring the nine forms of Goddess Durga", "deity": "Durga", "related_offering_subject": "Mantras"},
+        {"name": "Durga Ashtami", "date": "2026-10-18", "significance": "Peak Durga Puja day — Kanya Pujan and Ashtami worship", "deity": "Durga", "related_offering_subject": "Mantras"},
+        {"name": "Dussehra (Vijayadashami)", "date": "2026-10-20", "significance": "Triumph of good over evil, marking the end of Navratri", "deity": "Durga", "related_offering_subject": ""},
+        {"name": "Karva Chauth", "date": "2026-10-29", "significance": "Married women fast for their husbands' longevity and wellbeing", "deity": "", "related_offering_subject": ""},
+        {"name": "Dhanteras", "date": "2026-11-06", "significance": "Worship of wealth and Goddess Lakshmi, start of the Diwali season", "deity": "Lakshmi", "related_offering_subject": ""},
+        {"name": "Naraka Chaturdashi (Choti Diwali)", "date": "2026-11-07", "significance": "Commemorates Krishna's victory over the demon Narakasura", "deity": "Krishna", "related_offering_subject": "Bhagavad Gita"},
+        {"name": "Diwali (Lakshmi Puja)", "date": "2026-11-08", "significance": "The festival of lights — the main Lakshmi Puja day", "deity": "Lakshmi", "related_offering_subject": ""},
+        {"name": "Govardhan Puja", "date": "2026-11-10", "significance": "Commemorates Krishna lifting Govardhan hill to shelter Vraj", "deity": "Krishna", "related_offering_subject": "Bhagavad Gita"},
+        {"name": "Bhai Dooj", "date": "2026-11-10", "significance": "Sisters pray for their brothers' long life and wellbeing", "deity": "", "related_offering_subject": ""},
+        {"name": "Chhath Puja", "date": "2026-11-14", "significance": "Ancient worship of the Sun God at the river's edge", "deity": "Surya", "related_offering_subject": ""},
+        {"name": "Kartik Purnima (Dev Deepawali)", "date": "2026-11-24", "significance": "Full moon of Kartik — mass lamp-lighting at the sacred ghats", "deity": "Shiva", "related_offering_subject": "Mantras"},
+        {"name": "Gita Jayanti", "date": "2026-12-20", "significance": "Anniversary of Krishna's recitation of the Bhagavad Gita at Kurukshetra", "deity": "Krishna", "related_offering_subject": "Bhagavad Gita"},
+    ]
+    for f in CURATED_FESTIVALS_2026_H2:
+        if not await db.festivals.find_one({"name": f["name"], "date": f["date"]}):
+            await db.festivals.insert_one(f)
 
     # Blogs / Journal
     if await db.blogs.count_documents({}) == 0:

@@ -23,7 +23,7 @@ export default function Community() {
 
   return (
     <div className="max-w-3xl mx-auto py-16 px-6">
-      <div className="overline mb-3">Community · moderated</div>
+      <div className="eyebrow mb-3">Community · moderated</div>
       <h1 className="text-5xl font-serif tracking-tight">A room worth being in.</h1>
       <p className="mt-4 text-muted-foreground max-w-xl">
         Disagreement about interpretation is welcome; contempt for a tradition or a person is not. No caste-based gatekeeping, no communal politics, no unqualified prediction or medical advice.

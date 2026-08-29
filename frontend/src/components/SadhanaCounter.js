@@ -52,7 +52,7 @@ export default function SadhanaCounter({ offeringId, initial, onUpdate }) {
   return (
     <div className="rounded-lg border border-border bg-card/60 p-8 md:p-14" data-testid="sadhana-panel">
       <div className="text-center max-w-2xl mx-auto">
-        <div className="overline mb-3">Sankalpa · a vow, in your own words</div>
+        <div className="eyebrow mb-3">Sankalpa · a vow, in your own words</div>
         {!initial?.sankalpa ? (
           <div className="space-y-3">
             <Input
@@ -100,7 +100,7 @@ export default function SadhanaCounter({ offeringId, initial, onUpdate }) {
       {/* Streak arc — compassionate: missed days fade */}
       <div className="mt-16 max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-3">
-          <div className="overline">Last 21 days · compassionate streak</div>
+          <div className="eyebrow">Last 21 days · compassionate streak</div>
           <div className="text-xs text-muted-foreground tabular">
             <span data-testid="sadhana-streak" className="text-foreground font-medium">{streak}</span> day streak · {totalJapa} japa total
           </div>

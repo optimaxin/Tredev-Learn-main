@@ -27,6 +27,7 @@ next-env.d.ts
 
 # Production builds
 /build
+build/
 dist/
 dist
 
@@ -36,6 +37,7 @@ dist
 *credentials.json*
 
 # Logs and debug files
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -83,6 +85,7 @@ android-sdk/
 .env
 .env.*
 *.env
+*.env*
 credentials.json
 *.key
 .credentials

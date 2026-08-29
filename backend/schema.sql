@@ -344,3 +344,109 @@ CREATE TABLE IF NOT EXISTS mantras (
     created_by  uuid
 );
 CREATE INDEX IF NOT EXISTS idx_mantras_deity ON mantras(deity);
+
+-- ==================== FEATURE TOGGLES ====================
+CREATE TABLE IF NOT EXISTS feature_toggles (
+    key        text PRIMARY KEY,
+    label      text DEFAULT '',
+    enabled    boolean DEFAULT true,
+    updated_by uuid,
+    updated_at text
+);
+INSERT INTO feature_toggles (key, label) VALUES
+    ('build', 'Course Builder'),
+    ('offerings', 'Offerings'),
+    ('sessions', 'Live Sessions'),
+    ('webinars', 'Webinars'),
+    ('verses', 'Verses'),
+    ('mantras', 'Mantras'),
+    ('content-review', 'Content Review'),
+    ('doubts', 'Doubts'),
+    ('certs', 'Certificates'),
+    ('consultations', 'Consultations'),
+    ('quizzes', 'Quizzes'),
+    ('grading', 'Grading')
+ON CONFLICT (key) DO NOTHING;
+
+-- Quiz -> Event link, and typed/course-context quizzes
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS kind    text DEFAULT 'session';
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS quiz_id uuid;
+
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS context          text DEFAULT 'event';
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS status           text DEFAULT 'published';
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS unlock_rule      text DEFAULT 'always';
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS approved_by      uuid;
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS approved_by_name text DEFAULT '';
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS approved_at      text;
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS review_notes     text DEFAULT '';
+
+-- Quiz scheduling window (drives Events auto-appear / auto-expire)
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS starts_at text;
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS ends_at   text;
+
+-- Manual grading (paragraph questions)
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS status        text DEFAULT 'graded';
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS graded_by     uuid;
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS graded_at     text;
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS manual_scores jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS feedback      jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS total_score   integer DEFAULT 0;
+
+-- Completion-time tracking (leaderboard fastest-time ranking)
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS started_at          text;
+ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS time_taken_seconds  integer;
+
+-- Assessments (course-context quizzes) and Journal (blog) are decoupled features with
+-- their own toggle, independent of the "quizzes" (event-context) and "sessions" toggles.
+INSERT INTO feature_toggles (key, label) VALUES
+    ('assessments', 'Assessments'),
+    ('journal', 'Journal (Blog)')
+ON CONFLICT (key) DO NOTHING;
+
+-- Assessment review audit trail (who submitted it, when) + quiz-to-festival linking
+-- ("Play & Win" — a festival card launches its attached event-context quiz).
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS submitted_at text;
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS festival_id   uuid;
+
+-- Custom stream thumbnail for the Live Session cards on the Events page.
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS thumbnail_url text DEFAULT '';
+
+-- Staff edits to an already-published course assessment are held here until an
+-- Ācharya approves them; the live doc's top-level fields stay untouched until then.
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS pending_changes jsonb;
+
+-- Staff reply pushed back to the learner's chat widget for a consultation request.
+ALTER TABLE consultations ADD COLUMN IF NOT EXISTS reply text DEFAULT '';
+
+-- ==================== QUERY TICKETS (Queries/Doubts redesign — GUVI/Zen Class style) ====================
+-- Ticketed chat: a learner opens a ticket, any staff member can claim it by being the
+-- first to reply (exclusivity lock), and the full thread persists in query_messages.
+CREATE TABLE IF NOT EXISTS query_tickets (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id           uuid,
+    assigned_staff_id uuid,
+    title             text,
+    description       text DEFAULT '',
+    category_tags     jsonb DEFAULT '[]'::jsonb,
+    status            text DEFAULT 'OPEN',
+    created_at        text,
+    updated_at        text
+);
+CREATE INDEX IF NOT EXISTS idx_query_tickets_user ON query_tickets(user_id);
+CREATE INDEX IF NOT EXISTS idx_query_tickets_staff ON query_tickets(assigned_staff_id);
+CREATE INDEX IF NOT EXISTS idx_query_tickets_status ON query_tickets(status);
+
+CREATE TABLE IF NOT EXISTS query_messages (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_id    uuid,
+    sender_id    uuid,
+    sender_role  text,
+    message_text text,
+    created_at   text
+);
+CREATE INDEX IF NOT EXISTS idx_query_messages_ticket ON query_messages(ticket_id);
+
+INSERT INTO feature_toggles (key, label) VALUES
+    ('queries', 'Queries')
+ON CONFLICT (key) DO NOTHING;
+ALTER TABLE consultations ADD COLUMN IF NOT EXISTS replied_at text;

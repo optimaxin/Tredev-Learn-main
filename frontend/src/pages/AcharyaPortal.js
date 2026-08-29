@@ -124,7 +124,7 @@ export default function AcharyaPortal() {
 
               {/* Lessons to review — recorded video + written content uploaded by staff */}
               <div className="mt-5">
-                <div className="overline flex items-center gap-2 mb-3"><BookOpen className="w-3.5 h-3.5" /> Lessons to review ({Array.isArray(o.modules) ? o.modules.length : 0})</div>
+                <div className="eyebrow flex items-center gap-2 mb-3"><BookOpen className="w-3.5 h-3.5" /> Lessons to review ({Array.isArray(o.modules) ? o.modules.length : 0})</div>
                 {(!o.modules || o.modules.length === 0) && (
                   <div className="text-xs text-muted-foreground rounded-lg bg-muted p-3">No lessons uploaded yet — ask the academic team to add recorded video & written content before sign-off.</div>
                 )}
@@ -171,14 +171,14 @@ export default function AcharyaPortal() {
             <form onSubmit={submitContent} className="space-y-4">
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <label className="overline">Kind</label>
+                  <label className="eyebrow">Kind</label>
                   <Select value={newContent.kind} onValueChange={(v)=>setNewContent({...newContent, kind: v})}>
                     <SelectTrigger className="mt-2 h-11" data-testid="acharya-content-kind"><SelectValue /></SelectTrigger>
                     <SelectContent>{CONTENT_KINDS.map(k => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label className="overline">Course (optional)</label>
+                  <label className="eyebrow">Course (optional)</label>
                   <Select value={newContent.offering_id} onValueChange={(v)=>setNewContent({...newContent, offering_id: v})}>
                     <SelectTrigger className="mt-2 h-11" data-testid="acharya-content-offering"><SelectValue placeholder="Attach to a course…" /></SelectTrigger>
                     <SelectContent>{offerings.map(o => <SelectItem key={o.id} value={o.id}>{o.title}</SelectItem>)}</SelectContent>
@@ -186,12 +186,12 @@ export default function AcharyaPortal() {
                 </div>
               </div>
               <div>
-                <label className="overline">Title</label>
+                <label className="eyebrow">Title</label>
                 <Input value={newContent.title} onChange={(e)=>setNewContent({...newContent, title: e.target.value})}
                   data-testid="acharya-content-title" className="mt-2 h-11" placeholder="e.g. On the meaning of 'phalaṃ' in BG 2.47" />
               </div>
               <div>
-                <label className="overline">Body</label>
+                <label className="eyebrow">Body</label>
                 <Textarea value={newContent.body} onChange={(e)=>setNewContent({...newContent, body: e.target.value})}
                   data-testid="acharya-content-body" className="mt-2 min-h-[220px] font-editorial"
                   placeholder="Write freely — the academic team will format, cite, and typeset before publication." />
@@ -288,7 +288,7 @@ export default function AcharyaPortal() {
               </div>
               <div className="mt-4 grid sm:grid-cols-[1fr_auto] gap-3 items-end">
                 <div>
-                  <label className="overline flex items-center gap-1"><PenLine className="w-3 h-3"/> Signature</label>
+                  <label className="eyebrow flex items-center gap-1"><PenLine className="w-3 h-3"/> Signature</label>
                   <Input value={signName[c.code] ?? user?.name ?? ""} onChange={(e)=>setSignName({...signName, [c.code]: e.target.value})}
                     data-testid={`sign-name-${c.code}`} className="mt-2 h-11 font-editorial italic" />
                 </div>

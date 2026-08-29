@@ -13,12 +13,12 @@ import { HOME } from "@/constants/testIds";
 
 const NAV = [
   { to: "/courses", label: "Courses", testid: HOME.navCourses },
-  { to: "/webinars", label: "Webinars", testid: "nav-webinars" },
+  { to: "/events", label: "Events", testid: "nav-events" },
+  { to: "/calendar", label: "Calendar", testid: "nav-calendar" },
   { to: "/mentors", label: "Mentors", testid: "nav-mentors" },
   { to: "/calculators", label: "Free Tools", testid: HOME.navCalculators },
   { to: "/mantras", label: "Mantras", testid: "nav-mantras" },
   { to: "/blog", label: "Journal", testid: "nav-blog" },
-  { to: "/events", label: "Events", testid: "nav-events" },
   { to: "/consultation", label: "Consultation", testid: HOME.navConsultation },
 ];
 
@@ -40,23 +40,39 @@ export default function Layout({ children }) {
 
   const onLogout = async () => { await logout(); nav("/"); };
 
+  // The Learner Dashboard reads better on a clean, flat theme background —
+  // the celestial artwork stays everywhere else.
+  const isLearnerDashboard = loc.pathname.startsWith("/learner");
+  const pageBackground = theme === "dark" || isLearnerDashboard ? undefined : {
+    backgroundImage: "linear-gradient(hsl(var(--background) / 0.7), hsl(var(--background) / 0.7)), url(/assets/celestial-temple-bg.png)",
+    backgroundSize: "cover",
+    backgroundPosition: "center top",
+    backgroundRepeat: "no-repeat",
+    backgroundAttachment: "fixed",
+  };
+
   return (
-    <div className="min-h-screen bg-parchment noise-overlay relative">
-      <header className="sticky top-0 z-50 glass-strong border-b border-border">
-        <div className="site-container h-16 flex items-center gap-6">
+    <div className={`min-h-screen noise-overlay relative ${isLearnerDashboard ? "bg-background" : "bg-parchment"}`} style={pageBackground}>
+      {theme === "dark" && (
+        <div className="dark-video-layer">
+          <video autoPlay muted loop playsInline
+            src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260701_083907_581a119a-89b7-4c9f-a6ef-560625e0086f.mp4" />
+        </div>
+      )}
+      <header className="sticky top-4 md:top-6 z-50 px-4 md:px-6">
+        <div className="mx-auto max-w-6xl glass navbar-glow rounded-full shadow-float h-16 flex items-center gap-6 px-5 md:px-8">
           <Link to="/" data-testid={HOME.navLogo} className="flex items-baseline gap-2 group shrink-0">
-            <span className="font-display text-2xl font-bold tracking-tight text-gradient-cosmic">Tredev</span>
-            <span className="font-display italic text-xl text-accent">Learn</span>
+            <span className="font-display text-2xl font-bold tracking-tight text-gradient-cosmic">Tredev Learn</span>
           </Link>
-          <nav className="hidden lg:flex items-center gap-6 ml-2">
+          <nav className="hidden lg:flex flex-1 items-center justify-center gap-6">
             {NAV.map((n) => (
               <Link key={n.to} to={n.to} data-testid={n.testid}
-                className={`text-sm font-medium link-underline transition-colors ${loc.pathname.startsWith(n.to) ? "text-primary" : "text-foreground/85 hover:text-primary"}`}>
+                className={`text-sm font-medium font-sans transition-colors pb-1 whitespace-nowrap ${loc.pathname.startsWith(n.to) ? "text-accent border-b-2 border-accent" : "text-foreground/80 hover:text-accent link-underline"}`}>
                 {n.label}
               </Link>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto lg:ml-0 flex items-center gap-2 shrink-0">
             <button onClick={toggle} data-testid={HOME.themeToggle}
               className="w-9 h-9 rounded-full border border-border hover:bg-muted flex items-center justify-center transition-colors"
               aria-label="Toggle theme">
@@ -97,7 +113,7 @@ export default function Layout({ children }) {
                   <Button variant="ghost" size="sm">Sign in</Button>
                 </Link>
                 <Link to="/register" data-testid={HOME.navRegister}>
-                  <Button size="sm" className="rounded-full px-5 bg-gradient-hot text-white hover:opacity-90 btn-glow border-0">
+                  <Button size="sm" className="rounded-full px-5 bg-primary text-primary-foreground hover:opacity-90 border-0">
                     Enroll now
                   </Button>
                 </Link>
@@ -110,7 +126,7 @@ export default function Layout({ children }) {
           </div>
         </div>
         {mobileOpen && (
-          <div className="lg:hidden border-t border-border bg-popover px-5 py-4 grid gap-2">
+          <div className="lg:hidden mx-auto max-w-6xl mt-2 rounded-3xl border border-border bg-popover px-5 py-4 grid gap-2 shadow-float">
             {NAV.map((n) => (
               <Link key={n.to} to={n.to} className="text-sm py-2" data-testid={`m-${n.testid}`}>
                 {n.label}
@@ -134,17 +150,17 @@ export default function Layout({ children }) {
             </div>
           </div>
           <div>
-            <div className="overline mb-3">Study</div>
+            <div className="eyebrow mb-3">Study</div>
             <ul className="text-sm space-y-2">
               <li><Link to="/courses" className="link-underline">All courses</Link></li>
               <li><Link to="/courses?type=sadhana" className="link-underline">Sadhanas</Link></li>
               <li><Link to="/courses?type=masterclass" className="link-underline">Free masterclasses</Link></li>
-              <li><Link to="/webinars" className="link-underline">Upcoming webinars</Link></li>
+              <li><Link to="/events" className="link-underline">Upcoming events</Link></li>
               <li><Link to="/mentors" className="link-underline">Meet the mentors</Link></li>
             </ul>
           </div>
           <div>
-            <div className="overline mb-3">Free tools</div>
+            <div className="eyebrow mb-3">Free tools</div>
             <ul className="text-sm space-y-2">
               <li><Link to="/calculators" className="link-underline">Panchang · Kundli · Numerology</Link></li>
               <li><Link to="/calculators" className="link-underline">Tarot · Ram Shalākā</Link></li>
@@ -153,11 +169,11 @@ export default function Layout({ children }) {
             </ul>
           </div>
           <div>
-            <div className="overline mb-3">Trust</div>
+            <div className="eyebrow mb-3">Trust</div>
             <ul className="text-sm space-y-2">
               <li><Link to="/verify" className="link-underline">Verify a certificate</Link></li>
               <li><Link to="/blog" className="link-underline">Journal</Link></li>
-              <li><Link to="/events" className="link-underline">Events</Link></li>
+              <li><Link to="/calendar" className="link-underline">Festival calendar</Link></li>
               <li><Link to="/about" className="link-underline">About us</Link></li>
               <li><span className="text-muted-foreground">Ācharya sign-off · every lesson</span></li>
             </ul>

@@ -63,39 +63,39 @@ export default function OfferingEditor({ offering, onSaved }) {
       <h4 className="font-display font-semibold">Course details</h4>
       <div className="grid md:grid-cols-2 gap-4">
         <div className="md:col-span-2">
-          <label className="overline">Title</label>
+          <label className="eyebrow">Title</label>
           <Input value={f.title} onChange={(e)=>set({title:e.target.value})} className="mt-2 h-11" data-testid={`edit-title-${offering.id}`} />
         </div>
         <div className="md:col-span-2">
-          <label className="overline">Subtitle</label>
+          <label className="eyebrow">Subtitle</label>
           <Input value={f.subtitle} onChange={(e)=>set({subtitle:e.target.value})} className="mt-2 h-11" />
         </div>
         <div className="md:col-span-2">
-          <label className="overline">Description</label>
+          <label className="eyebrow">Description</label>
           <Textarea value={f.description} onChange={(e)=>set({description:e.target.value})} className="mt-2 min-h-[90px]" />
         </div>
         <div>
-          <label className="overline">Type</label>
+          <label className="eyebrow">Type</label>
           <Select value={f.type} onValueChange={(v)=>set({type:v})}>
             <SelectTrigger className="mt-2 h-11"><SelectValue /></SelectTrigger>
             <SelectContent>{TYPES.map(t=><SelectItem key={t} value={t}>{t.replace("_"," ")}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div>
-          <label className="overline">Subject</label>
+          <label className="eyebrow">Subject</label>
           <Input value={f.subject} onChange={(e)=>set({subject:e.target.value})} className="mt-2 h-11" />
         </div>
         <div>
-          <label className="overline">Duration</label>
+          <label className="eyebrow">Duration</label>
           <Input value={f.duration} onChange={(e)=>set({duration:e.target.value})} className="mt-2 h-11" placeholder="e.g. 8-week cohort" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="overline">Price (INR)</label>
+            <label className="eyebrow">Price (INR)</label>
             <Input type="number" value={f.price_inr} onChange={(e)=>set({price_inr:e.target.value})} className="mt-2 h-11" data-testid={`edit-price-${offering.id}`} />
           </div>
           <div>
-            <label className="overline">Price (USD)</label>
+            <label className="eyebrow">Price (USD)</label>
             <Input type="number" value={f.price_usd} onChange={(e)=>set({price_usd:e.target.value})} className="mt-2 h-11" />
           </div>
         </div>
@@ -103,7 +103,7 @@ export default function OfferingEditor({ offering, onSaved }) {
 
       {/* Cover image */}
       <div>
-        <label className="overline">Cover image / thumbnail</label>
+        <label className="eyebrow">Cover image / thumbnail</label>
         <div className="mt-2 flex items-center gap-4 flex-wrap">
           {f.image_url
             ? <img src={f.image_url} alt="cover" className="w-40 h-24 rounded-lg object-cover border border-border" />

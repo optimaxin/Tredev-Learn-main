@@ -20,13 +20,14 @@ import Community from "@/pages/Community";
 import MyCertificates from "@/pages/MyCertificates";
 import Blog from "@/pages/Blog";
 import BlogDetail from "@/pages/BlogDetail";
-import Webinars from "@/pages/Webinars";
 import Mentors from "@/pages/Mentors";
 import Events from "@/pages/Events";
+import Calendar from "@/pages/Calendar";
+import QuizAttempt from "@/pages/QuizAttempt";
 import Mantras from "@/pages/Mantras";
 import AboutUs from "@/pages/AboutUs";
 import ShlokaPlayer from "@/components/ShlokaPlayer";
-import api from "@/lib/api";
+import { fetchDailyVerse } from "@/lib/dailyVerse";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
@@ -38,14 +39,14 @@ function Protected({ children, roles }) {
 
 function ShlokaOfDayRoute() {
   const [v, setV] = React.useState(null);
-  React.useEffect(() => { api.get("/shloka-of-day").then((r)=>setV(r.data)); }, []);
+  React.useEffect(() => { fetchDailyVerse().then(setV).catch(() => {}); }, []);
   return (
     <div className="max-w-[1400px] mx-auto px-6 lg:px-10 py-16">
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">TODAY'S VERSE</div>
       <h1 className="font-display text-5xl md:text-6xl font-bold tracking-tight mb-8">
         Shloka of the <span className="text-gradient-hot">day</span>
       </h1>
-      {v && v.id && <ShlokaPlayer verse={v} />}
+      {v && v.devanagari && <ShlokaPlayer verse={v} />}
     </div>
   );
 }
@@ -71,14 +72,16 @@ export default function App() {
               <Route path="/verify/:code" element={<CertificateVerify />} />
               <Route path="/blog" element={<Blog />} />
               <Route path="/blog/:slug" element={<BlogDetail />} />
-              <Route path="/webinars" element={<Webinars />} />
+              <Route path="/webinars" element={<Navigate to="/events" replace />} />
               <Route path="/mentors" element={<Mentors />} />
               <Route path="/events" element={<Events />} />
+              <Route path="/calendar" element={<Calendar />} />
               <Route path="/mantras" element={<Mantras />} />
               <Route path="/about" element={<AboutUs />} />
 
               <Route path="/learner" element={<Protected roles={["learner","academic_staff","acharya","admin","super_admin"]}><LearnerDashboard /></Protected>} />
               <Route path="/certificates" element={<Protected><MyCertificates /></Protected>} />
+              <Route path="/quiz/:quizId" element={<Protected><QuizAttempt /></Protected>} />
               <Route path="/acharya" element={<Protected roles={["acharya"]}><AcharyaPortal /></Protected>} />
               <Route path="/staff" element={<Protected roles={["academic_staff","admin","super_admin"]}><AcademicStaffPortal /></Protected>} />
               <Route path="/admin" element={<Protected roles={["admin","super_admin"]}><AdminPortal /></Protected>} />

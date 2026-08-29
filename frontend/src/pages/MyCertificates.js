@@ -15,7 +15,7 @@ export default function MyCertificates() {
 
   return (
     <div className="site-container py-16">
-      <div className="overline mb-3">My credentials</div>
+      <div className="eyebrow mb-3">My credentials</div>
       <h1 className="text-5xl font-serif tracking-tight mb-10">Certificates.</h1>
       <div className="grid md:grid-cols-2 gap-6">
         {certs.map((c) => (
@@ -23,7 +23,7 @@ export default function MyCertificates() {
             className="rounded-lg border border-border p-10 bg-card/60 relative overflow-hidden"
             data-testid={`mycert-${c.code}`}>
             <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-accent/10 blur-2xl" />
-            <div className="overline text-primary mb-3">Certificate of Study</div>
+            <div className="eyebrow text-primary mb-3">Certificate of Study</div>
             <div className="font-serif text-2xl leading-tight">{c.offering_title}</div>
             <div className="mt-4 text-sm text-muted-foreground">Awarded to <strong className="text-foreground">{c.user_name}</strong></div>
             {c.acharya_name && <div className="text-sm text-muted-foreground">Signed by Ācharya <strong className="text-foreground">{c.acharya_name}</strong></div>}

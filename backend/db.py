@@ -56,15 +56,23 @@ COLUMNS = {
     "consultations": {
         "id": "uuid", "name": "text", "email": "text", "phone": "text", "interest": "text",
         "consent": "bool", "assigned_to": "uuid", "status": "text", "created_at": "text",
+        "reply": "text", "replied_at": "text",
     },
     "quizzes": {
         "id": "uuid", "offering_id": "uuid", "title": "text", "questions": "jsonb",
         "created_at": "text", "created_by": "uuid",
+        "context": "text", "status": "text", "unlock_rule": "text",
+        "approved_by": "uuid", "approved_by_name": "text", "approved_at": "text",
+        "review_notes": "text", "starts_at": "text", "ends_at": "text",
+        "submitted_at": "text", "festival_id": "uuid", "pending_changes": "jsonb",
     },
     "quiz_attempts": {
         "id": "uuid", "quiz_id": "uuid", "user_id": "uuid", "answers": "jsonb",
         "score": "int", "correct": "int", "total": "int", "submitted_at": "text",
         "graded": "bool",
+        "status": "text", "graded_by": "uuid", "graded_at": "text",
+        "manual_scores": "jsonb", "feedback": "jsonb", "total_score": "int",
+        "started_at": "text", "time_taken_seconds": "int",
     },
     "doubts": {
         "id": "uuid", "offering_id": "uuid", "question": "text", "asked_by": "uuid",
@@ -80,6 +88,7 @@ COLUMNS = {
         "id": "uuid", "title": "text", "offering_id": "uuid", "acharya_id": "uuid",
         "starts_at": "text", "duration_min": "int", "mode": "text", "acharya_name": "text",
         "created_at": "text", "created_by": "uuid", "join_url": "text", "topic": "text",
+        "kind": "text", "quiz_id": "uuid", "thumbnail_url": "text",
     },
     "certificates": {
         "id": "uuid", "code": "text", "user_id": "uuid", "user_name": "text",
@@ -135,6 +144,19 @@ COLUMNS = {
         "verse_id": "text", "acharya_id": "uuid", "acharya_name": "text", "status": "text",
         "review_notes": "text", "reviewed_by": "uuid", "reviewed_by_name": "text",
         "reviewed_at": "text", "created_at": "text",
+    },
+    "feature_toggles": {
+        "key": "text", "label": "text", "enabled": "bool", "updated_by": "uuid",
+        "updated_at": "text",
+    },
+    "query_tickets": {
+        "id": "uuid", "user_id": "uuid", "assigned_staff_id": "uuid",
+        "title": "text", "description": "text", "category_tags": "jsonb",
+        "status": "text", "created_at": "text", "updated_at": "text",
+    },
+    "query_messages": {
+        "id": "uuid", "ticket_id": "uuid", "sender_id": "uuid", "sender_role": "text",
+        "message_text": "text", "created_at": "text",
     },
 }
 
@@ -229,17 +251,34 @@ def _coerce_for_where(table: str, col: str, value):
     return _coerce(table, col, value)
 
 
-def _build_where(table: str, where: dict, start: int = 1):
-    """Return (sql_fragment, params, next_param_index). Raises _Impossible."""
-    if not where:
-        return "", [], start
+_RANGE_OPS = {"$lt": "<", "$lte": "<=", "$gt": ">", "$gte": ">="}
+
+
+def _build_clauses(table: str, where: dict, start: int):
+    """Return (clauses_list, params, next_param_index). Raises _Impossible."""
     clauses = []
     params = []
     i = start
     for key, cond in where.items():
+        if key == "$or":
+            or_clauses = []
+            for sub in cond:
+                try:
+                    sub_clauses, sub_params, i = _build_clauses(table, sub, i)
+                except _Impossible:
+                    continue
+                if not sub_clauses:
+                    continue
+                or_clauses.append("(" + " AND ".join(sub_clauses) + ")")
+                params.extend(sub_params)
+            if not or_clauses:
+                raise _Impossible()
+            clauses.append("(" + " OR ".join(or_clauses) + ")")
+            continue
         col = "id" if key == "_id" else key
         qcol = _q(col)
         if isinstance(cond, dict):
+            matched_op = False
             if "$in" in cond:
                 vals = [_coerce_for_where_safe(table, col, v) for v in cond["$in"]]
                 vals = [v for v in vals if v is not _MISS]
@@ -249,12 +288,21 @@ def _build_where(table: str, where: dict, start: int = 1):
                 clauses.append(f"{qcol} IN ({placeholders})")
                 params.extend(vals)
                 i += len(vals)
-            elif "$ne" in cond:
+                matched_op = True
+            if "$ne" in cond:
                 v = _coerce(table, col, cond["$ne"])
                 clauses.append(f"{qcol} IS DISTINCT FROM ${i}")
                 params.append(v)
                 i += 1
-            else:
+                matched_op = True
+            for op, sql_op in _RANGE_OPS.items():
+                if op in cond:
+                    v = _coerce(table, col, cond[op])
+                    clauses.append(f"{qcol} {sql_op} ${i}")
+                    params.append(v)
+                    i += 1
+                    matched_op = True
+            if not matched_op:
                 raise ValueError(f"Unsupported operator in {cond!r}")
         else:
             v = _coerce_for_where(table, col, cond)
@@ -264,6 +312,16 @@ def _build_where(table: str, where: dict, start: int = 1):
                 clauses.append(f"{qcol} = ${i}")
                 params.append(v)
                 i += 1
+    return clauses, params, i
+
+
+def _build_where(table: str, where: dict, start: int = 1):
+    """Return (sql_fragment, params, next_param_index). Raises _Impossible."""
+    if not where:
+        return "", [], start
+    clauses, params, i = _build_clauses(table, where, start)
+    if not clauses:
+        return "", [], i
     return "WHERE " + " AND ".join(clauses), params, i
 
 
@@ -442,6 +500,15 @@ class Collection:
         # Delete a single matching row.
         sql = (f"DELETE FROM {_q(self.name)} WHERE id = "
                f"(SELECT id FROM {_q(self.name)} {where_sql} LIMIT 1)")
+        async with _pool.acquire() as conn:
+            await conn.execute(sql, *params)
+
+    async def delete_many(self, where: dict):
+        try:
+            where_sql, params, _ = _build_where(self.name, where)
+        except _Impossible:
+            return
+        sql = f"DELETE FROM {_q(self.name)} {where_sql}"
         async with _pool.acquire() as conn:
             await conn.execute(sql, *params)
 

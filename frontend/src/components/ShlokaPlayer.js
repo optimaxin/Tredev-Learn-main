@@ -8,6 +8,19 @@ import { Play, Pause, Mic, MicOff, Gauge } from "lucide-react";
  *  - Right: Attributed translations + commentaries (tabs)
  *  - Bottom: Glass audio bar with playback and record-yourself (mocked mic recorder)
  */
+// Free TTS stream — no pre-recorded audio files needed.
+function googleTtsUrl(text) {
+  return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=hi&q=${encodeURIComponent(text)}`;
+}
+
+const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+
+function pickSanskritVoice() {
+  if (!speechSupported) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return voices.find((v) => /^(sa|hi)/i.test(v.lang)) || voices.find((v) => /^en/i.test(v.lang)) || voices[0] || null;
+}
+
 export default function ShlokaPlayer({ verse }) {
   const [hovered, setHovered] = useState(null);
   const [playing, setPlaying] = useState(false);
@@ -15,19 +28,89 @@ export default function ShlokaPlayer({ verse }) {
   const [tab, setTab] = useState("translations");
   const [recording, setRecording] = useState(false);
   const [progress, setProgress] = useState(0);
-  const timerRef = useRef(null);
+  const [repeatCount, setRepeatCount] = useState(1);
+  const audioRef = useRef(null);
   const mediaRef = useRef(null);
+  const repeatsLeftRef = useRef(0);
+  const fallenBackRef = useRef(false);
+
+  // Reset playback state and tear down audio/speech when the verse changes or unmounts.
+  useEffect(() => {
+    setPlaying(false);
+    setProgress(0);
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      if (speechSupported) window.speechSynthesis.cancel();
+    };
+  }, [verse]);
 
   useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = speed;
+  }, [speed]);
+
+  const speakOnce = (text) => {
+    const utter = new SpeechSynthesisUtterance(text.replace(/\n/g, ". "));
+    const voice = pickSanskritVoice();
+    if (voice) utter.voice = voice;
+    utter.lang = voice?.lang || "hi-IN";
+    utter.rate = speed;
+    utter.onend = () => {
+      repeatsLeftRef.current -= 1;
+      if (repeatsLeftRef.current > 0) speakOnce(text);
+      else { setPlaying(false); setProgress(0); }
+    };
+    utter.onerror = () => { setPlaying(false); setProgress(0); };
+    window.speechSynthesis.speak(utter);
+  };
+
+  // Google's translate_tts stream is an unofficial, unauthenticated endpoint that Google
+  // throttles unpredictably (observed intermittent 503s) — fall back to the browser's
+  // built-in speech synthesis so pronunciation playback still works when it does.
+  const fallbackToSpeech = (text) => {
+    if (fallenBackRef.current) return;
+    fallenBackRef.current = true;
+    audioRef.current = null;
+    if (speechSupported) speakOnce(text);
+    else { setPlaying(false); setProgress(0); }
+  };
+
+  const getAudio = (text) => {
+    if (audioRef.current) return audioRef.current;
+    const audio = new Audio(googleTtsUrl(text));
+    audio.playbackRate = speed;
+    audio.ontimeupdate = () => setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+    audio.onended = () => {
+      repeatsLeftRef.current -= 1;
+      if (repeatsLeftRef.current > 0) {
+        audio.currentTime = 0;
+        audio.play();
+      } else {
+        setPlaying(false);
+        setProgress(0);
+      }
+    };
+    audio.onerror = () => fallbackToSpeech(text);
+    audioRef.current = audio;
+    return audio;
+  };
+
+  const togglePlay = () => {
+    const text = verse?.devanagari || verse?.iast;
+    if (!text) return;
     if (playing) {
-      timerRef.current = setInterval(() => {
-        setProgress((p) => (p >= 100 ? 0 : p + (0.6 * speed)));
-      }, 100);
-    } else {
-      clearInterval(timerRef.current);
+      audioRef.current?.pause();
+      if (speechSupported) window.speechSynthesis.cancel();
+      setPlaying(false);
+      return;
     }
-    return () => clearInterval(timerRef.current);
-  }, [playing, speed]);
+    fallenBackRef.current = false;
+    repeatsLeftRef.current = Math.max(1, Math.min(20, Number(repeatCount) || 1));
+    const audio = getAudio(text);
+    audio.currentTime = 0;
+    audio.play().catch(() => fallbackToSpeech(text));
+    setPlaying(true);
+  };
 
   const startRec = async () => {
     try {
@@ -54,14 +137,14 @@ export default function ShlokaPlayer({ verse }) {
         {/* LEFT — Verse */}
         <div className="p-8 lg:p-14 border-b lg:border-b-0 lg:border-r border-border">
           <div className="flex items-baseline gap-3 mb-8">
-            <div className="overline text-primary">{verse.scripture}</div>
+            <div className="eyebrow text-primary">{verse.scripture}</div>
             <div className="text-xs text-muted-foreground tabular">{verse.reference}</div>
           </div>
           <div className="font-devanagari text-3xl md:text-4xl leading-[1.9] tracking-wide text-foreground whitespace-pre-line" data-testid="shloka-devanagari">
             {verse.devanagari}
           </div>
           <div className="mt-8 pt-8 border-t border-border/60">
-            <div className="overline mb-3">Transliteration (IAST)</div>
+            <div className="eyebrow mb-3">Transliteration (IAST)</div>
             <div className="font-serif italic text-lg md:text-xl leading-relaxed text-foreground/85 whitespace-pre-line" data-testid="shloka-iast">
               {verse.iast}
             </div>
@@ -69,7 +152,7 @@ export default function ShlokaPlayer({ verse }) {
 
           {words.length > 0 && (
             <div className="mt-10">
-              <div className="overline mb-3">Word by word</div>
+              <div className="eyebrow mb-3">Word by word</div>
               <div className="flex flex-wrap gap-2">
                 {words.map((w, i) => (
                   <button
@@ -116,7 +199,7 @@ export default function ShlokaPlayer({ verse }) {
             <ul className="space-y-6">
               {translations.map((t, i) => (
                 <li key={i} className="border-l-2 border-accent/50 pl-4">
-                  <div className="overline text-accent-foreground/70">{t.author}</div>
+                  <div className="eyebrow text-accent-foreground/70">{t.author}</div>
                   <p className="font-serif italic text-lg leading-relaxed mt-1">"{t.text}"</p>
                 </li>
               ))}
@@ -125,7 +208,7 @@ export default function ShlokaPlayer({ verse }) {
             <ul className="space-y-6">
               {commentaries.map((c, i) => (
                 <li key={i}>
-                  <div className="overline text-secondary/80">{c.author}</div>
+                  <div className="eyebrow text-secondary/80">{c.author}</div>
                   <p className="text-sm leading-relaxed text-foreground/85 mt-1">{c.text}</p>
                 </li>
               ))}
@@ -138,16 +221,18 @@ export default function ShlokaPlayer({ verse }) {
       {/* Audio bar */}
       <div className="glass border-t border-border p-4 md:p-5 flex items-center gap-4">
         <button
-          onClick={() => setPlaying((p) => !p)}
+          onClick={togglePlay}
+          disabled={!verse?.devanagari && !verse?.iast}
           data-testid="shloka-play-btn"
-          className="w-11 h-11 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors">
+          title="Play pronunciation"
+          className="w-11 h-11 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40">
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
         </button>
         <div className="flex-1">
           <div className="h-1 rounded-full bg-muted overflow-hidden">
             <div className="h-full bg-accent transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground uppercase tracking-widest">
+          <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground uppercase tracking-widest flex-wrap">
             <Gauge className="w-3 h-3" />
             {[0.5, 0.75, 1, 1.25, 1.5].map((s) => (
               <button key={s} onClick={() => setSpeed(s)}
@@ -156,6 +241,16 @@ export default function ShlokaPlayer({ verse }) {
                 {s}×
               </button>
             ))}
+            <label className="flex items-center gap-1.5 ml-2 pl-2 border-l border-border normal-case tracking-normal">
+              Repeat
+              <input
+                type="number" min={1} max={20} value={repeatCount}
+                onChange={(e) => setRepeatCount(e.target.value)}
+                data-testid="shloka-repeat-count"
+                className="w-12 h-6 rounded border border-border bg-background px-1.5 text-center text-foreground"
+              />
+              ×
+            </label>
           </div>
         </div>
         <button

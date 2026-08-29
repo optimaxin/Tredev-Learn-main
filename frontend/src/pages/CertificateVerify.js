@@ -25,7 +25,7 @@ export default function CertificateVerify() {
 
   return (
     <div className="max-w-3xl mx-auto py-24 px-6">
-      <div className="overline mb-3">Public verification</div>
+      <div className="eyebrow mb-3">Public verification</div>
       <h1 className="text-5xl font-serif mb-4">Verify a certificate.</h1>
       <p className="text-foreground/70 mb-10">Every Tredev Learn certificate has a public verification page. A revoked certificate says so, rather than vanishing.</p>
       <form onSubmit={verify} className="flex gap-3">
@@ -43,10 +43,10 @@ export default function CertificateVerify() {
               <div className="flex items-center gap-3 mb-4"><CheckCircle2 className="w-8 h-8 text-primary" /><Badge className="bg-primary text-primary-foreground">Valid</Badge></div>
               <h2 className="font-serif text-3xl">{result.certificate.offering_title}</h2>
               <div className="mt-4 space-y-2 text-sm">
-                <div><span className="overline mr-3">Awarded to</span> <strong>{result.certificate.user_name}</strong></div>
-                {result.certificate.acharya_name && <div><span className="overline mr-3">Signed by Ācharya</span> {result.certificate.acharya_name}</div>}
-                <div><span className="overline mr-3">Code</span> <span className="font-mono">{result.certificate.code}</span></div>
-                <div><span className="overline mr-3">Issued</span> {new Date(result.certificate.issued_at).toLocaleDateString()}</div>
+                <div><span className="eyebrow mr-3">Awarded to</span> <strong>{result.certificate.user_name}</strong></div>
+                {result.certificate.acharya_name && <div><span className="eyebrow mr-3">Signed by Ācharya</span> {result.certificate.acharya_name}</div>}
+                <div><span className="eyebrow mr-3">Code</span> <span className="font-mono">{result.certificate.code}</span></div>
+                <div><span className="eyebrow mr-3">Issued</span> {new Date(result.certificate.issued_at).toLocaleDateString()}</div>
               </div>
             </>
           ) : result.revoked ? (
