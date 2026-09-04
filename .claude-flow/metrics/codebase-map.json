@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-08-12T06:25:27.877Z",
-  "projectRoot": "/Users/sagar/Downloads/Tredev-Learn-main",
+  "timestamp": "2026-08-29T13:46:36.635Z",
+  "projectRoot": "D:\\Work\\Internship-Work\\Tredev-Learn-main",
   "structure": {
     "hasPackageJson": false,
     "hasTsConfig": false,
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1786515927877
+  "scannedAt": 1788011196636
 }

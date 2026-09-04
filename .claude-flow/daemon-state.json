@@ -1,75 +1,75 @@
 {
   "running": true,
-  "startedAt": "2026-08-13T04:36:17.249Z",
+  "startedAt": "2026-08-29T13:31:36.616Z",
   "workers": {
     "map": {
-      "runCount": 3,
-      "successCount": 3,
+      "runCount": 93,
+      "successCount": 93,
       "failureCount": 0,
-      "averageDurationMs": 15.333333333333334,
-      "lastRun": "2026-08-12T06:25:27.886Z",
-      "lastStartedAt": "2026-08-12T06:25:27.869Z",
-      "nextRun": "2026-08-13T04:36:17.250Z",
+      "averageDurationMs": 13.290322580645158,
+      "lastRun": "2026-08-29T13:46:36.636Z",
+      "lastStartedAt": "2026-08-29T13:46:36.632Z",
+      "nextRun": "2026-08-29T14:01:36.638Z",
       "isRunning": false
     },
     "audit": {
-      "runCount": 5,
-      "successCount": 5,
+      "runCount": 139,
+      "successCount": 139,
       "failureCount": 0,
-      "averageDurationMs": 19,
-      "lastRun": "2026-08-12T06:25:27.946Z",
-      "lastStartedAt": "2026-08-12T06:25:27.936Z",
-      "nextRun": "2026-08-13T04:38:17.250Z",
+      "averageDurationMs": 9.920863309352521,
+      "lastRun": "2026-08-29T13:43:36.652Z",
+      "lastStartedAt": "2026-08-29T13:43:36.647Z",
+      "nextRun": "2026-08-29T13:53:36.654Z",
       "isRunning": false
     },
     "optimize": {
-      "runCount": 3,
-      "successCount": 3,
+      "runCount": 92,
+      "successCount": 92,
       "failureCount": 0,
-      "averageDurationMs": 17,
-      "lastRun": "2026-08-12T06:25:27.918Z",
-      "lastStartedAt": "2026-08-12T06:25:27.903Z",
-      "nextRun": "2026-08-13T04:40:17.250Z",
+      "averageDurationMs": 8.891304347826086,
+      "lastRun": "2026-08-29T13:50:36.651Z",
+      "lastStartedAt": "2026-08-29T13:50:36.647Z",
+      "nextRun": "2026-08-29T13:50:36.638Z",
       "isRunning": false
     },
     "consolidate": {
-      "runCount": 2,
-      "successCount": 2,
+      "runCount": 49,
+      "successCount": 49,
       "failureCount": 0,
-      "averageDurationMs": 86,
-      "lastRun": "2026-08-12T06:25:27.956Z",
-      "lastStartedAt": "2026-08-12T06:25:27.928Z",
-      "nextRun": "2026-08-13T04:42:17.250Z",
+      "averageDurationMs": 145.02040816326527,
+      "lastRun": "2026-08-29T13:37:36.767Z",
+      "lastStartedAt": "2026-08-29T13:37:36.632Z",
+      "nextRun": "2026-08-29T14:07:36.769Z",
       "isRunning": false
     },
     "testgaps": {
-      "runCount": 3,
-      "successCount": 3,
+      "runCount": 69,
+      "successCount": 69,
       "failureCount": 0,
-      "averageDurationMs": 32,
-      "lastRun": "2026-08-12T06:25:27.877Z",
-      "lastStartedAt": "2026-08-12T06:25:27.860Z",
-      "nextRun": "2026-08-13T04:44:17.250Z",
+      "averageDurationMs": 11.927536231884057,
+      "lastRun": "2026-08-29T13:39:36.624Z",
+      "lastStartedAt": "2026-08-29T13:39:36.621Z",
+      "nextRun": "2026-08-29T13:59:36.626Z",
       "isRunning": false
     },
     "backup": {
-      "runCount": 1,
-      "successCount": 1,
+      "runCount": 6,
+      "successCount": 6,
       "failureCount": 0,
-      "averageDurationMs": 361,
-      "lastRun": "2026-08-12T06:25:27.968Z",
-      "lastStartedAt": "2026-08-12T06:25:27.607Z",
-      "nextRun": "2026-08-13T06:25:27.968Z",
+      "averageDurationMs": 97,
+      "lastRun": "2026-08-29T06:34:30.279Z",
+      "lastStartedAt": "2026-08-29T06:34:30.232Z",
+      "nextRun": "2026-08-30T06:34:30.279Z",
       "isRunning": false
     },
     "harness": {
-      "runCount": 1,
-      "successCount": 1,
+      "runCount": 9,
+      "successCount": 9,
       "failureCount": 0,
-      "averageDurationMs": 145,
-      "lastRun": "2026-08-12T06:25:27.762Z",
-      "lastStartedAt": "2026-08-12T06:25:27.617Z",
-      "nextRun": "2026-08-13T04:48:17.250Z",
+      "averageDurationMs": 48.333333333333336,
+      "lastRun": "2026-08-29T13:43:36.644Z",
+      "lastStartedAt": "2026-08-29T13:43:36.626Z",
+      "nextRun": "2026-08-29T19:43:36.647Z",
       "isRunning": false
     },
     "predict": {
@@ -89,8 +89,8 @@
   },
   "config": {
     "autoStart": false,
-    "logDir": "/Users/sagar/Downloads/Tredev-Learn-main/.claude-flow/logs",
-    "stateFile": "/Users/sagar/Downloads/Tredev-Learn-main/.claude-flow/daemon-state.json",
+    "logDir": "D:\\Work\\Internship-Work\\Tredev-Learn-main\\.claude-flow\\logs",
+    "stateFile": "D:\\Work\\Internship-Work\\Tredev-Learn-main\\.claude-flow\\daemon-state.json",
     "maxConcurrent": 2,
     "workerTimeoutMs": 960000,
     "resourceThresholds": {
@@ -98,7 +98,7 @@
       "minFreeMemoryPercent": 5
     },
     "ttlMs": 43200000,
-    "idleShutdownMs": 0,
+    "idleShutdownMs": 1800000,
     "aiWorkersEnabled": false,
     "workers": [
       {
@@ -175,5 +175,5 @@
       }
     ]
   },
-  "savedAt": "2026-08-13T04:36:17.250Z"
+  "savedAt": "2026-08-29T13:50:36.652Z"
 }

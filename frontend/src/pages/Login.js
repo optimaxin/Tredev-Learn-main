@@ -33,16 +33,16 @@ export default function Login() {
 
   return (
     <div className="max-w-md mx-auto py-24 px-6">
-      <div className="overline mb-3">Sign in</div>
+      <div className="eyebrow mb-3">Sign in</div>
       <h1 className="text-4xl font-serif mb-8">Continue your study.</h1>
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className="overline">Email</label>
+          <label className="eyebrow">Email</label>
           <Input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} required
             data-testid="login-email" className="mt-2 h-12" />
         </div>
         <div>
-          <label className="overline">Password</label>
+          <label className="eyebrow">Password</label>
           <Input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required
             data-testid="login-password" className="mt-2 h-12" />
         </div>

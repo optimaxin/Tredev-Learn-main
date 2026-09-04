@@ -27,21 +27,21 @@ export default function Register() {
 
   return (
     <div className="max-w-md mx-auto py-24 px-6">
-      <div className="overline mb-3">Join</div>
+      <div className="eyebrow mb-3">Join</div>
       <h1 className="text-4xl font-serif mb-8">Begin.</h1>
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className="overline">Full name</label>
+          <label className="eyebrow">Full name</label>
           <Input value={name} onChange={(e)=>setName(e.target.value)} required
             data-testid="register-name" className="mt-2 h-12" />
         </div>
         <div>
-          <label className="overline">Email</label>
+          <label className="eyebrow">Email</label>
           <Input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} required
             data-testid="register-email" className="mt-2 h-12" />
         </div>
         <div>
-          <label className="overline">Password (min 6)</label>
+          <label className="eyebrow">Password (min 6)</label>
           <Input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required minLength={6}
             data-testid="register-password" className="mt-2 h-12" />
         </div>

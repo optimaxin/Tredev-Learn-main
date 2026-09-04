@@ -9956,6 +9956,11 @@ sanitize.css@*:
   resolved "https://registry.yarnpkg.com/sanitize.css/-/sanitize.css-13.0.0.tgz#2675553974b27964c75562ade3bd85d79879f173"
   integrity sha512-ZRwKbh/eQ6w9vmTjkuG0Ioi3HBwPFce0O+v//ve+aOq1oeCy7jMV2qzzAlpsNuqpqCBjjriM1lbtZbF/Q8jVyA==
 
+sanscript@0.0.2:
+  version "0.0.2"
+  resolved "https://registry.yarnpkg.com/sanscript/-/sanscript-0.0.2.tgz#5d0384e63475c61986da385fbccce3a15ec3b3e6"
+  integrity sha512-2gEdjQ3+iGzJk5grDJE+sEgxrQivR7jjRx6sCeKSGdFpHvHbCH4n4EmDqjXvmaZ2wA2hJ38+snBEmMZ9SAKu9A==
+
 sass-loader@^12.3.0:
   version "12.6.0"
   resolved "https://registry.yarnpkg.com/sass-loader/-/sass-loader-12.6.0.tgz#5148362c8e2cdd4b950f3c63ac5d16dbfed37bcb"
@@ -10537,6 +10542,11 @@ sucrase@^3.35.0:
     pirates "^4.0.1"
     tinyglobby "^0.2.11"
     ts-interface-checker "^0.1.9"
+
+suncalc@2.0.1:
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/suncalc/-/suncalc-2.0.1.tgz#3dae1a3f18cbbc487bf693aeb09a2e61a3170a4e"
+  integrity sha512-wjujU+HpsP1TUvN3/9dFkVQQCsMZbk7PkdZsASRJR4jVPHCm9Qy0FVkFTqXfs70Ag2yheN7ZUavzCyOjhJDGxQ==
 
 supports-color@^5.3.0:
   version "5.5.0"

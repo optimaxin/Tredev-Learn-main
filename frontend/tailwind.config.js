@@ -11,11 +11,12 @@ module.exports = {
     },
     extend: {
       fontFamily: {
-        serif: ['"Fraunces"', '"Cormorant Garamond"', "ui-serif", "Georgia", "serif"],
-        sans: ['Manrope', "ui-sans-serif", "system-ui", "sans-serif"],
-        display: ['"Fraunces"', '"Cormorant Garamond"', "serif"],
-        editorial: ['"Cormorant Garamond"', "serif"],
-        devanagari: ['"Tiro Devanagari Sanskrit"', '"Noto Serif Devanagari"', "serif"],
+        serif: ["Eczar", "ui-serif", "Georgia", "serif"],
+        sans: ['"Plus Jakarta Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ['"Eczar"', "serif"],
+        hero: ["Yatra One", "cursive"],
+        editorial: ['"Lora"', "serif"],
+        devanagari: ["Tiro Devanagari Sanskrit", '"Noto Serif Devanagari"', "serif"],
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
       },
       colors: {
@@ -69,6 +70,12 @@ module.exports = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      boxShadow: {
+        DEFAULT: "0 10px 30px rgba(19, 17, 49, 0.05)",
+        card: "0 10px 30px rgba(19, 17, 49, 0.05)",
+        button: "0 4px 14px rgba(19, 17, 49, 0.15)",
+        float: "0 12px 32px rgba(0, 0, 0, 0.12)",
       },
       keyframes: {
         "fade-in-up": { "0%": { opacity: 0, transform: "translateY(14px)" }, "100%": { opacity: 1, transform: "translateY(0)" } },

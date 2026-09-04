@@ -30,7 +30,7 @@ export default function Consultation() {
     <div className="site-container py-16">
       <div className="grid lg:grid-cols-[1.05fr_1fr] gap-16 items-start">
         <div>
-          <div className="overline mb-3">Free pathway consultation</div>
+          <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">Free pathway consultation</div>
           <h1 className="text-5xl md:text-6xl font-serif tracking-tight leading-tight">A human,<br/>not a paywall.</h1>
           <p className="mt-6 text-lg text-foreground/80 leading-relaxed max-w-lg">
             Not sure where to begin — Sanskrit, the Gītā, meditation, jyotiṣa? Rather than lose you to that hesitation,
@@ -59,19 +59,19 @@ export default function Consultation() {
         ) : (
           <form onSubmit={submit} className="rounded-lg border border-border p-8 md:p-10 bg-card/60 space-y-5" data-testid="consultation-form">
             <div>
-              <Label className="overline">Your name</Label>
+              <Label className="eyebrow">Your name</Label>
               <Input value={f.name} onChange={set("name")} required data-testid="consult-name" className="mt-2 h-12" />
             </div>
             <div>
-              <Label className="overline">Email</Label>
+              <Label className="eyebrow">Email</Label>
               <Input type="email" value={f.email} onChange={set("email")} required data-testid="consult-email" className="mt-2 h-12" />
             </div>
             <div>
-              <Label className="overline">Phone (with country code)</Label>
+              <Label className="eyebrow">Phone (with country code)</Label>
               <Input value={f.phone} onChange={set("phone")} required data-testid="consult-phone" className="mt-2 h-12" placeholder="+91 …" />
             </div>
             <div>
-              <Label className="overline">What are you drawn to?</Label>
+              <Label className="eyebrow">What are you drawn to?</Label>
               <Textarea value={f.interest} onChange={set("interest")} required data-testid="consult-interest"
                 className="mt-2 min-h-[100px] font-serif italic" placeholder="I've always wanted to understand the Bhagavad Gītā, but…" />
             </div>

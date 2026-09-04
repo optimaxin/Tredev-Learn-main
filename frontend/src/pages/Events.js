@@ -1,79 +1,194 @@
 import React, { useEffect, useState } from "react";
-import api from "@/lib/api";
-import { Calendar, MapPin, ArrowRight } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
+import api, { formatApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Clock, Zap, CheckCircle2, X, Calendar, Video, HelpCircle, Trophy } from "lucide-react";
+import { toast } from "sonner";
+
+function Countdown({ startsInSeconds }) {
+  const [r, setR] = useState(startsInSeconds);
+  useEffect(() => {
+    setR(startsInSeconds);
+    const t = setInterval(() => setR((x) => Math.max(0, x - 1)), 1000);
+    return () => clearInterval(t);
+  }, [startsInSeconds]);
+  if (r <= 0) return <span className="chip bg-secondary text-white">Live now</span>;
+  const d = Math.floor(r / 86400), h = Math.floor((r % 86400) / 3600),
+        m = Math.floor((r % 3600) / 60), s = r % 60;
+  return (
+    <div className="flex gap-2">
+      {[["Days", d], ["Hrs", h], ["Min", m], ["Sec", s]].map(([l, n], i) => (
+        <div key={i} className="text-center bg-muted rounded-lg px-3 py-2 min-w-14">
+          <div className="font-display font-bold text-2xl text-primary tabular">{String(n).padStart(2, "0")}</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Events() {
-  const [festivals, setFestivals] = useState([]);
-  const [sessions, setSessions] = useState([]);
+  const [webinars, setWebinars] = useState([]);
+  const [confirm, setConfirm] = useState(null); // { payment_id, webinar, join_url }
+  const [registering, setRegistering] = useState(null);
+  const [registered, setRegistered] = useState(new Set());
+  const [quizzes, setQuizzes] = useState([]);
+  const { user } = useAuth();
+  const nav = useNavigate();
+
+  const loadWebinars = () => api.get("/webinars").then((r) => setWebinars(r.data));
+  const loadRegs = () => user
+    ? api.get("/webinars/my-registrations").then((r) => setRegistered(new Set(r.data))).catch(() => {})
+    : setRegistered(new Set());
+
   useEffect(() => {
-    api.get("/festivals").then((r) => setFestivals(r.data));
-    api.get("/webinars").then((r) => setSessions(r.data));
+    loadWebinars();
+    // Quizzes appear automatically once created/published and disappear once their end time passes
+    // or the quiz is deleted — the backend filters both, so this list is always current.
+    api.get("/quizzes/events").then((r) => setQuizzes(r.data)).catch(() => setQuizzes([]));
   }, []);
+  useEffect(() => { loadRegs(); /* eslint-disable-next-line */ }, [user?.id]);
+
+  const register = async (w) => {
+    if (!user) return nav("/login", { state: { from: "/events" } });
+    setRegistering(w.id);
+    try {
+      const { data } = await api.post(`/webinars/${w.id}/register`);
+      setConfirm(data);
+      setRegistered((s) => new Set(s).add(w.id));
+      loadWebinars();
+    } catch (e) { toast.error(formatApiError(e)); }
+    setRegistering(null);
+  };
 
   return (
     <div className="site-container py-16">
-      <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">EVENTS · CALENDAR</div>
+      <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">
+        <Zap className="w-3 h-3" /> LIVE & INTERACTIVE
+      </div>
       <h1 className="font-display text-5xl md:text-6xl font-bold tracking-tight">
-        The festival <span className="text-gradient-cosmic">calendar</span> is our marketing calendar
+        <span className="text-gradient-cosmic">Events</span> — webinars, sessions & quizzes
       </h1>
       <p className="mt-4 text-lg text-muted-foreground max-w-2xl">
-        Religious time already carries urgency, anticipation, and collective participation — so our launches align to it.
+        Everything happening this week, in one place. For the Hindu festival calendar, visit the <Link to="/calendar" className="text-primary link-underline">Calendar</Link> section.
       </p>
 
-      <div className="mt-14 flex items-baseline gap-3 flex-wrap mb-6">
-        <h2 className="font-display text-3xl font-bold">Festival calendar</h2>
-        <span className="chip bg-accent/15 text-accent border border-accent/30">Auto-computed · Vedic (tithi-based)</span>
-      </div>
-      <div className="grid md:grid-cols-2 gap-5">
-        {festivals.map((f) => (
-          <div key={f.id} data-testid={`festival-${f.id}`}
-            className="rounded-2xl border border-border p-6 bg-card card-elevated flex items-start gap-5">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-hot flex flex-col items-center justify-center shrink-0 text-white">
-              <div className="text-[10px] uppercase tracking-widest opacity-90">{new Date(f.date).toLocaleDateString(undefined, { month: "short" })}</div>
-              <div className="font-display font-bold text-2xl leading-none">{new Date(f.date).getDate()}</div>
+      {/* UPCOMING WEBINARS */}
+      <h2 className="mt-14 font-display text-3xl font-bold mb-6">Upcoming webinars</h2>
+      <div className="space-y-6">
+        {webinars.map((w) => (
+          <div key={w.id} className="rounded-2xl border border-border overflow-hidden glass card-elevated grid md:grid-cols-[280px_1fr_auto] gap-0" data-testid={`webinar-full-${w.id}`}>
+            <div className="relative aspect-video md:aspect-auto md:h-full overflow-hidden">
+              <img src={w.cover_image} alt="" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
             </div>
-            <div className="flex-1">
-              <div className="font-display font-bold text-xl">{f.name}</div>
-              <div className="text-xs text-primary tabular mt-0.5">
-                {new Date(f.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "long", year: "numeric" })}
+            <div className="p-6 md:p-8">
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <span className="chip bg-primary/15 text-primary border border-primary/30">{new Date(w.starts_at).toLocaleString(undefined, { weekday: "long", day: "numeric", month: "short" })}</span>
+                <span className="chip bg-muted">{new Date(w.starts_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+                {w.seats_remaining < 30 && <span className="chip bg-destructive text-destructive-foreground">Only {w.seats_remaining} seats left</span>}
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">{f.significance}</p>
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-                {f.related_offering_subject && (
-                  <Link to={`/courses?q=${encodeURIComponent(f.related_offering_subject)}`}
-                    className="text-xs text-primary inline-flex items-center gap-1 link-underline" data-testid={`festival-related-${f.id}`}>
-                    Courses: {f.related_offering_subject} <ArrowRight className="w-3 h-3" />
-                  </Link>
-                )}
-                {f.deity && (
-                  <Link to={`/mantras?deity=${encodeURIComponent(f.deity)}`}
-                    className="text-xs text-accent inline-flex items-center gap-1 link-underline" data-testid={`festival-mantras-${f.id}`}>
-                    {f.deity} mantras <ArrowRight className="w-3 h-3" />
-                  </Link>
-                )}
+              <h3 className="font-display text-2xl md:text-3xl font-bold leading-tight">{w.title}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">{w.description}</p>
+              <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {w.duration_min} min</span>
+                <span>with <strong className="text-foreground">{w.mentor_name}</strong></span>
               </div>
+              <div className="mt-5">
+                <Countdown startsInSeconds={w.starts_in_seconds} />
+              </div>
+            </div>
+            <div className="p-6 md:p-8 flex flex-col justify-center md:border-l border-border md:min-w-[220px] text-center">
+              <div className="font-display font-bold text-4xl text-gradient-hot tabular">₹{w.price_inr}</div>
+              {w.orig_price_inr > w.price_inr && <div className="text-sm text-muted-foreground line-through tabular">₹{w.orig_price_inr}</div>}
+              {registered.has(w.id) ? (
+                <Button disabled data-testid={`webinar-full-registered-${w.id}`}
+                  className="mt-5 rounded-full h-11 px-8 bg-primary text-primary-foreground border-0 disabled:opacity-100">
+                  <CheckCircle2 className="w-4 h-4 mr-2" /> Registered
+                </Button>
+              ) : (
+                <Button onClick={() => register(w)} disabled={registering === w.id} data-testid={`webinar-full-register-${w.id}`}
+                  className="mt-5 rounded-full bg-gradient-hot text-white border-0 btn-glow h-11 px-8">
+                  {registering === w.id ? "Processing…" : "Register now"}
+                </Button>
+              )}
+              <div className="mt-3 text-[10px] text-muted-foreground">Recording emailed after · lifetime access</div>
             </div>
           </div>
         ))}
+        {webinars.length === 0 && <div className="text-center py-10 text-muted-foreground">No upcoming webinars.</div>}
       </div>
 
-      <h2 className="mt-16 font-display text-3xl font-bold mb-6">Upcoming live sessions</h2>
-      <div className="space-y-3">
-        {sessions.map((s) => (
-          <Link to="/webinars" key={s.id}
-            className="rounded-xl border border-border p-5 bg-card hover:border-primary transition-colors flex items-center gap-5">
-            <Calendar className="w-5 h-5 text-primary shrink-0" />
-            <div className="flex-1">
-              <div className="font-display text-lg font-semibold">{s.title}</div>
-              <div className="text-xs text-muted-foreground">
-                {new Date(s.starts_at).toLocaleString(undefined, { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · {s.mentor_name}
+      {/* QUIZZES */}
+      <h2 className="mt-16 font-display text-3xl font-bold mb-6">Quizzes</h2>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {quizzes.map((q) => {
+          const count = (q.questions || []).length;
+          const points = (q.questions || []).reduce((sum, x) => sum + (x.points || 1), 0);
+          const estMinutes = Math.max(5, Math.ceil(count * 1.5));
+          return (
+            <Link to={`/quiz/${q.id}`} key={q.id}
+              className="rounded-2xl border border-border p-6 bg-card card-elevated hover:border-primary transition-colors flex flex-col gap-4" data-testid={`quiz-event-${q.id}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                  <HelpCircle className="w-5 h-5 text-primary" />
+                </div>
+                <div className="font-display text-lg font-semibold leading-snug">{q.title}</div>
               </div>
-            </div>
-            <span className="text-primary font-medium text-sm">Details →</span>
-          </Link>
-        ))}
+              <div className="text-xs text-muted-foreground">
+                {q.starts_at ? new Date(q.starts_at).toLocaleString(undefined, { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Open now"}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="chip bg-muted text-[11px]"><HelpCircle className="w-3 h-3" /> {count} question{count === 1 ? "" : "s"}</span>
+                <span className="chip bg-muted text-[11px]"><Clock className="w-3 h-3" /> ~{estMinutes} min</span>
+                {points > 0 && <span className="chip bg-secondary/15 text-secondary text-[11px]"><Trophy className="w-3 h-3" /> {points} pts</span>}
+              </div>
+              <span className="mt-auto text-primary font-medium text-sm">Attempt quiz →</span>
+            </Link>
+          );
+        })}
+        {quizzes.length === 0 && (
+          <div className="text-sm text-muted-foreground">No quizzes scheduled yet.</div>
+        )}
       </div>
+
+      {/* Registration confirmation */}
+      {confirm && (
+        <div className="fixed inset-0 z-[200] flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)}>
+          <div className="relative w-full max-w-md my-8 rounded-2xl bg-card border border-border p-8 text-center shadow-2xl" onClick={(e) => e.stopPropagation()} data-testid="webinar-confirm">
+            <button onClick={() => setConfirm(null)} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-5 h-5" /></button>
+            <div className="w-14 h-14 rounded-full bg-primary/15 text-primary grid place-items-center mx-auto"><CheckCircle2 className="w-8 h-8" /></div>
+            <h3 className="font-display font-bold text-2xl mt-4">You're registered!</h3>
+            <p className="text-sm text-muted-foreground mt-1">A confirmation has been recorded. Recording emailed after · lifetime access.</p>
+
+            <div className="mt-6 text-left rounded-xl border border-border bg-background/60 p-5 space-y-3">
+              <div className="font-display font-semibold text-lg">{confirm.webinar?.title}</div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Calendar className="w-4 h-4" /> {confirm.webinar?.starts_at ? new Date(confirm.webinar.starts_at).toLocaleString() : "TBA"} · {confirm.webinar?.duration_min} min
+              </div>
+              {confirm.webinar?.mentor_name && <div className="text-sm text-muted-foreground">with <strong className="text-foreground">{confirm.webinar.mentor_name}</strong></div>}
+              <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
+                <span className="text-muted-foreground">Payment ID</span>
+                <span className="font-mono text-primary">{confirm.payment_id}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Amount</span>
+                <span className="tabular">{confirm.webinar?.price_inr ? `₹${confirm.webinar.price_inr}` : "Free"}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">{confirm.note}</p>
+            </div>
+
+            {confirm.join_url ? (
+              <a href={confirm.join_url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-hot text-white h-11 px-8 font-medium" data-testid="webinar-join-link">
+                <Video className="w-4 h-4" /> Join link
+              </a>
+            ) : (
+              <Button onClick={() => setConfirm(null)} className="mt-5 rounded-full h-11 px-8">Done</Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

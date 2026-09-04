@@ -1,19 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import api, { formatApiError } from "@/lib/api";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Video, Radio, ChevronRight, HelpCircle, CheckCircle2, ScrollText, Award, Send, Zap } from "lucide-react";
+import { Video, Radio, MessageSquare, Award, Zap, BarChart3, BookOpen, CalendarClock } from "lucide-react";
+import LearnerSidebar from "@/components/LearnerSidebar";
+import CourseWorkspace from "@/components/CourseWorkspace";
+import QueriesUser from "@/components/queries/QueriesUser";
 
 /** Sample-style mini certificate card that a learner sees for each earned credential. */
 function CertificatePreview({ c }) {
   return (
-    <div className="relative rounded-2xl p-1 bg-gradient-to-br from-amber-500 via-orange-500 to-fuchsia-600 shadow-xl" data-testid={`cert-preview-${c.code}`}>
+    <div className="relative rounded-2xl p-1 bg-gradient-to-br from-amber-500 via-orange-500 to-primary shadow-xl" data-testid={`cert-preview-${c.code}`}>
       <div className="relative rounded-[14px] p-6 md:p-8 overflow-hidden"
            style={{ background: "linear-gradient(135deg, #fdf7e8 0%, #f6ecd0 50%, #f0dfae 100%)" }}>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none opacity-[0.06]">
@@ -40,7 +41,7 @@ function CertificatePreview({ c }) {
           {/* Seal + signature */}
           <div className="flex items-center justify-center gap-6">
             <div className="text-center">
-              <div className="font-editorial italic text-lg text-amber-950" style={{ fontFamily: '"Cormorant Garamond", serif' }}>
+              <div className="font-editorial italic text-lg text-amber-950">
                 {(c.acharya_name || "").split(" ").slice(-1)[0] || "V. Shastri"}
               </div>
               <div className="border-t border-amber-800/60 pt-1 mt-1 max-w-[150px] mx-auto">
@@ -76,9 +77,7 @@ export default function LearnerDashboard() {
   const [certs, setCerts] = useState([]);
   const [doubts, setDoubts] = useState([]);
   const [events, setEvents] = useState([]);
-  const [doubtOfferingId, setDoubtOfferingId] = useState("");
-  const [doubtText, setDoubtText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [openCourseId, setOpenCourseId] = useState(null);
 
   const load = async () => {
     const [e, s, c, d, w, reg] = await Promise.all([
@@ -106,68 +105,84 @@ export default function LearnerDashboard() {
     } catch { toast.error("Could not join"); }
   };
 
-  const askDoubt = async (e) => {
-    e.preventDefault();
-    if (!doubtOfferingId) return toast.error("Please choose a course.");
-    if (!doubtText.trim()) return toast.error("Please describe your doubt.");
-    setSubmitting(true);
-    try {
-      await api.post("/doubts", { offering_id: doubtOfferingId, question: doubtText });
-      toast.success("Your question has been sent to the Tredev Learn team.");
-      setDoubtText("");
-      load();
-    } catch (err) { toast.error(formatApiError(err)); }
-    setSubmitting(false);
-  };
-
   return (
     <div className="site-container py-16">
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">LEARNER PORTAL</div>
       <h1 className="text-5xl font-display font-bold tracking-tight">Welcome, {user?.name}.</h1>
 
-      <Tabs defaultValue="courses" className="mt-10">
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="courses" data-testid="learner-tab-courses">My study</TabsTrigger>
-          <TabsTrigger value="live" data-testid="learner-tab-live">Live sessions</TabsTrigger>
-          <TabsTrigger value="events" data-testid="learner-tab-events">Events ({events.length})</TabsTrigger>
-          <TabsTrigger value="doubts" data-testid="learner-tab-doubts">Ask a doubt</TabsTrigger>
-          <TabsTrigger value="certs" data-testid="learner-tab-certs">Certificates</TabsTrigger>
+      <div className="mt-10">
+      <Tabs defaultValue="courses" className="grid lg:grid-cols-[260px_1fr] gap-10 items-start">
+        <TabsList className="flex lg:flex-col h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3" data-testid="learner-nav">
+          <TabsTrigger value="courses" data-testid="learner-tab-courses" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
+            <BookOpen className="w-4 h-4 mr-3 shrink-0" /> My study
+          </TabsTrigger>
+          <TabsTrigger value="performance" data-testid="learner-tab-performance" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
+            <BarChart3 className="w-4 h-4 mr-3 shrink-0" /> Performance
+          </TabsTrigger>
+          <TabsTrigger value="live" data-testid="learner-tab-live" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
+            <Radio className="w-4 h-4 mr-3 shrink-0" /> Live sessions
+          </TabsTrigger>
+          <TabsTrigger value="events" data-testid="learner-tab-events" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
+            <CalendarClock className="w-4 h-4 mr-3 shrink-0" /> Events ({events.length})
+          </TabsTrigger>
+          <TabsTrigger value="queries" data-testid="learner-tab-queries" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
+            <MessageSquare className="w-4 h-4 mr-3 shrink-0" /> Queries
+          </TabsTrigger>
+          <TabsTrigger value="certs" data-testid="learner-tab-certs" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
+            <Award className="w-4 h-4 mr-3 shrink-0" /> Certificates
+          </TabsTrigger>
         </TabsList>
 
         {/* MY STUDY */}
-        <TabsContent value="courses" className="mt-8">
-          {enrollments.length === 0 && (
-            <div className="text-muted-foreground text-sm">
-              You have not enrolled in anything yet. <Link to="/courses" className="text-primary link-underline">Browse the catalogue</Link>.
+        <TabsContent value="courses" className="mt-0">
+          {openCourseId ? (
+            <div>
+              <Button variant="outline" size="sm" onClick={() => setOpenCourseId(null)} className="mb-6 rounded-full" data-testid="course-workspace-back">
+                ← Back to my courses
+              </Button>
+              <CourseWorkspace offeringId={openCourseId} />
             </div>
+          ) : (
+            <>
+              {enrollments.length === 0 && (
+                <div className="text-muted-foreground text-sm">
+                  You have not enrolled in anything yet. <Link to="/courses" className="text-primary link-underline">Browse the catalogue</Link>.
+                </div>
+              )}
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {enrollments.map((e) => (
+                  <button key={e.id} onClick={() => setOpenCourseId(e.offering_id)} data-testid={`enrollment-${e.id}`}
+                    className="text-left rounded-2xl border border-border p-6 card-elevated bg-card">
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{e.offering?.type?.replace("_"," ")}</Badge>
+                    <div className="font-display font-bold text-xl mt-3 leading-tight">{e.offering?.title}</div>
+                    <div className="text-xs text-muted-foreground mt-2">Enrolled {new Date(e.enrolled_at).toLocaleDateString()}</div>
+                    {(() => {
+                      const total = (e.offering?.modules || []).length;
+                      const done = (e.completed_lessons || []).length;
+                      const pct = total ? Math.round((done / total) * 100) : (e.progress || 0);
+                      return (
+                        <div className="mt-4">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                            <span>{total ? `${done}/${total} lessons` : "Progress"}</span>
+                            <span className="tabular">{pct}%</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full bg-gradient-hot transition-all duration-500" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <div className="mt-5 text-sm text-primary">Continue →</div>
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {enrollments.map((e) => (
-              <Link key={e.id} to={`/courses/${e.offering_id}`} data-testid={`enrollment-${e.id}`}
-                className="rounded-2xl border border-border p-6 card-elevated bg-card">
-                <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{e.offering?.type?.replace("_"," ")}</Badge>
-                <div className="font-display font-bold text-xl mt-3 leading-tight">{e.offering?.title}</div>
-                <div className="text-xs text-muted-foreground mt-2">Enrolled {new Date(e.enrolled_at).toLocaleDateString()}</div>
-                {(() => {
-                  const total = (e.offering?.modules || []).length;
-                  const done = (e.completed_lessons || []).length;
-                  const pct = total ? Math.round((done / total) * 100) : (e.progress || 0);
-                  return (
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-                        <span>{total ? `${done}/${total} lessons` : "Progress"}</span>
-                        <span className="tabular">{pct}%</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-gradient-hot transition-all duration-500" style={{ width: `${pct}%` }} />
-                      </div>
-                    </div>
-                  );
-                })()}
-                <div className="mt-5 text-sm text-primary flex items-center">Continue <ChevronRight className="w-4 h-4 ml-1"/></div>
-              </Link>
-            ))}
-          </div>
+        </TabsContent>
+
+        {/* PERFORMANCE */}
+        <TabsContent value="performance" className="mt-0">
+          <LearnerSidebar user={user} enrollments={enrollments} certs={certs} sessions={sessions} doubts={doubts} />
         </TabsContent>
 
         {/* LIVE */}
@@ -218,82 +233,13 @@ export default function LearnerDashboard() {
                   : <Badge variant="outline" className="text-[10px] uppercase tracking-widest">Link nearer the date</Badge>}
               </div>
             ))}
-            {events.length === 0 && <div className="text-muted-foreground text-sm">You haven't registered for any events yet. <Link to="/webinars" className="text-primary link-underline">Browse webinars</Link>.</div>}
+            {events.length === 0 && <div className="text-muted-foreground text-sm">You haven't registered for any events yet. <Link to="/events" className="text-primary link-underline">Browse webinars</Link>.</div>}
           </div>
         </TabsContent>
 
-        {/* ASK A DOUBT */}
-        <TabsContent value="doubts" className="mt-8">
-          <div className="grid lg:grid-cols-[1fr_1.4fr] gap-8">
-            {/* Ask form */}
-            <form onSubmit={askDoubt} className="rounded-2xl border border-border p-6 bg-card space-y-4" data-testid="doubt-form">
-              <div className="flex items-center gap-2">
-                <HelpCircle className="w-5 h-5 text-primary" />
-                <h3 className="font-display font-bold text-xl">Ask a doubt</h3>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Someone from the Tredev Learn team will respond — usually within 24 hours.
-              </p>
-              <div>
-                <label className="overline">Course</label>
-                <Select value={doubtOfferingId} onValueChange={setDoubtOfferingId}>
-                  <SelectTrigger data-testid="doubt-course" className="mt-2 h-11"><SelectValue placeholder="Which course is this about?" /></SelectTrigger>
-                  <SelectContent>
-                    {enrollments.map((e) => (
-                      <SelectItem key={e.offering_id} value={e.offering_id}>{e.offering?.title}</SelectItem>
-                    ))}
-                    {enrollments.length === 0 && <div className="p-3 text-xs text-muted-foreground">Enroll in a course first to ask a doubt.</div>}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="overline">Your question</label>
-                <Textarea value={doubtText} onChange={(e)=>setDoubtText(e.target.value)}
-                  className="mt-2 min-h-[130px] font-editorial italic"
-                  placeholder="e.g. In BG 2.47, is 'phala' translated as 'fruit' or 'result'? Which commentary do we follow?"
-                  data-testid="doubt-text" />
-              </div>
-              <Button type="submit" disabled={submitting} data-testid="doubt-submit"
-                className="w-full rounded-full h-11 bg-gradient-hot text-white border-0">
-                {submitting ? "Sending…" : (<><Send className="w-4 h-4 mr-2" /> Send my question</>)}
-              </Button>
-            </form>
-
-            {/* My doubts thread */}
-            <div>
-              <h3 className="font-display font-bold text-xl mb-4">Your questions</h3>
-              <div className="space-y-3">
-                {doubts.map((d) => (
-                  <div key={d.id} className="rounded-2xl border border-border p-5 bg-card" data-testid={`my-doubt-${d.id}`}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Badge variant={d.status === "answered" ? "default" : "outline"} className="text-[10px] uppercase tracking-widest">
-                        {d.status}
-                      </Badge>
-                      {d.offering_title && <span className="text-xs text-muted-foreground">{d.offering_title}</span>}
-                      <span className="text-xs text-muted-foreground ml-auto tabular">{new Date(d.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <div className="font-editorial italic text-lg">"{d.question}"</div>
-                    {d.answer ? (
-                      <div className="mt-4 border-l-2 border-primary pl-4">
-                        <div className="text-xs text-primary uppercase tracking-widest mb-1">Answer</div>
-                        <p className="text-sm text-foreground/90 leading-relaxed">{d.answer}</p>
-                        <div className="text-[10px] text-muted-foreground mt-2">
-                          — Tredev Learn team · {d.answered_at ? new Date(d.answered_at).toLocaleDateString() : ""}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-3 text-xs text-muted-foreground italic">Awaiting a response…</div>
-                    )}
-                  </div>
-                ))}
-                {doubts.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-border p-8 text-center text-muted-foreground text-sm">
-                    You haven't asked any doubts yet.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+        {/* QUERIES */}
+        <TabsContent value="queries" className="mt-8">
+          <QueriesUser />
         </TabsContent>
 
         {/* CERTIFICATES */}
@@ -313,6 +259,7 @@ export default function LearnerDashboard() {
           )}
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }

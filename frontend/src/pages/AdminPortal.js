@@ -9,8 +9,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 
-const CAPABILITIES = ["course_builder", "quiz_author", "grader", "doubts", "consultations", "cohorts"];
+const CAPABILITIES = ["course_builder", "quiz_author", "assessment_author", "session_author", "journal_author", "grader", "doubts", "consultations", "cohorts"];
 const ROLES = ["learner", "acharya", "academic_staff", "admin", "super_admin"];
+const FEATURE_LABELS = {
+  build: "Course builder",
+  offerings: "All offerings",
+  sessions: "Live sessions",
+  webinars: "Webinars",
+  verses: "Verses",
+  mantras: "Mantras",
+  "content-review": "Ācharya content review",
+  doubts: "Doubts",
+  certs: "Certificates",
+  consultations: "Consultations",
+  quizzes: "Quizzes",
+  assessments: "Assessments",
+  journal: "Journal (Blog)",
+  grading: "Grading",
+};
 
 export default function AdminPortal() {
   const { user } = useAuth();
@@ -19,17 +35,19 @@ export default function AdminPortal() {
   const [audit, setAudit] = useState([]);
   const [offerings, setOfferings] = useState([]);
   const [festivals, setFestivals] = useState([]);
+  const [features, setFeatures] = useState([]);
   const isSuper = user?.role === "super_admin";
 
   const load = async () => {
-    const [u, g, a, o, f] = await Promise.all([
+    const [u, g, a, o, f, ft] = await Promise.all([
       api.get("/users"),
       api.get("/capabilities"),
       api.get("/audit-log"),
       api.get("/offerings?published_only=false"),
       api.get("/festivals"),
+      api.get("/feature-toggles"),
     ]);
-    setUsers(u.data); setGrants(g.data); setAudit(a.data); setOfferings(o.data); setFestivals(f.data);
+    setUsers(u.data); setGrants(g.data); setAudit(a.data); setOfferings(o.data); setFestivals(f.data); setFeatures(ft.data);
   };
   useEffect(() => { load(); }, []);
 
@@ -57,6 +75,13 @@ export default function AdminPortal() {
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
+  const toggleFeature = async (key, on) => {
+    try {
+      await api.patch(`/feature-toggles/${key}`, { enabled: on });
+      load();
+    } catch (e) { toast.error(formatApiError(e)); }
+  };
+
   const publishOffering = async (o) => {
     try {
       await api.patch(`/offerings/${o.id}`, { is_published: !o.is_published });
@@ -76,7 +101,7 @@ export default function AdminPortal() {
     <div className="site-container py-12">
       <div className="flex items-baseline gap-4">
         <div>
-          <div className="overline mb-1">{isSuper ? "Super Admin" : "Admin"} portal</div>
+          <div className="eyebrow mb-1">{isSuper ? "Super Admin" : "Admin"} portal</div>
           <h1 className="text-4xl font-serif tracking-tight">Everything.</h1>
         </div>
         {isSuper && <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest ml-auto">Super Admin authority</Badge>}
@@ -84,12 +109,40 @@ export default function AdminPortal() {
 
       <Tabs defaultValue="capabilities" className="mt-10">
         <TabsList className="flex-wrap h-auto">
+          <TabsTrigger value="features" data-testid="admin-tab-features">Feature toggles</TabsTrigger>
           <TabsTrigger value="capabilities" data-testid="admin-tab-capabilities">Capability grants</TabsTrigger>
           <TabsTrigger value="users" data-testid="admin-tab-users">Users ({users.length})</TabsTrigger>
           <TabsTrigger value="publishing" data-testid="admin-tab-publishing">Publishing ({offerings.length})</TabsTrigger>
           <TabsTrigger value="festivals" data-testid="admin-tab-festivals">Festival calendar</TabsTrigger>
           <TabsTrigger value="audit" data-testid="admin-tab-audit">Audit log</TabsTrigger>
         </TabsList>
+
+        {/* Feature toggles */}
+        <TabsContent value="features" className="mt-8">
+          <div className="rounded-lg border border-border bg-card/60 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Feature</TableHead>
+                  <TableHead className="text-center">Enabled</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {features.map((f)=>(
+                  <TableRow key={f.key} data-testid={`feature-row-${f.key}`}>
+                    <TableCell className="font-serif">{FEATURE_LABELS[f.key] || f.key}</TableCell>
+                    <TableCell className="text-center">
+                      <Switch checked={f.enabled} onCheckedChange={(v)=>toggleFeature(f.key,v)} data-testid={`feature-toggle-${f.key}`} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-xs text-muted-foreground mt-4">
+            Turning a feature off hides it from the Staff Panel and blocks its API for everyone, immediately.
+          </p>
+        </TabsContent>
 
         {/* Capability matrix */}
         <TabsContent value="capabilities" className="mt-8">
@@ -181,7 +234,7 @@ export default function AdminPortal() {
           <div className="grid md:grid-cols-2 gap-4">
             {festivals.map((f) => (
               <div key={f.id} className="rounded-lg border border-border p-6 bg-card/60">
-                <div className="overline text-primary">{f.date}</div>
+                <div className="eyebrow text-primary">{f.date}</div>
                 <div className="font-serif text-2xl mt-1">{f.name}</div>
                 <p className="text-sm text-muted-foreground mt-2">{f.significance}</p>
                 <Badge variant="outline" className="mt-3 text-[10px] uppercase tracking-widest">{f.related_offering_subject}</Badge>

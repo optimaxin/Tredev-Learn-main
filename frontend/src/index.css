@@ -1,4 +1,35 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,400;1,9..144,600&family=Manrope:wght@300;400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Tiro+Devanagari+Sanskrit:ital@0;1&family=Noto+Serif+Devanagari:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Yatra+One&family=Eczar:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Lora:ital,wght@0,500;0,600;0,700;1,500&family=Tiro+Devanagari+Sanskrit:ital@0;1&family=Noto+Serif+Devanagari:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+/* Raw design-system.md tokens (literal --color-... / --font-family-... names) —
+   kept alongside the HSL tokens below so components can reference either
+   system; both resolve to the same palette. */
+:root {
+  --color-primary: #131131;
+  --color-primary-light: #1c1947;
+  --color-secondary: #c58b2b;
+  --color-secondary-light: #f7e8c4;
+  --color-bg-page: #faf6ee;
+  --color-bg-card: #ffffff;
+  --color-bg-card-alt: #f4f0e8;
+  --color-bg-modal: #ffffff;
+  --color-bg-input: #f7f5f0;
+  --color-bg-footer: #0c0a21;
+  --color-text-heading: #131131;
+  --color-text-body: #4a4a5a;
+  --color-text-muted: #030304;
+  --color-text-gold: #b37b25;
+  --color-text-inverse: #ffffff;
+  --color-border-subtle: #efebe1;
+  --color-border-gold: #e5c678;
+  --color-accent-cta: #e67e22;
+  --color-accent-badge: #f5d178;
+  --gradient-gold-tag: linear-gradient(135deg, #fceecb 0%, #f5d178 100%);
+  --gradient-hero-overlay: radial-gradient(circle, rgba(250, 246, 238, 0.4) 0%, rgba(250, 246, 238, 0.95) 100%);
+  --font-family-display: 'Yatra One', cursive;
+  --font-family-heading: 'Eczar', serif;
+  --font-family-body: 'Plus Jakarta Sans', sans-serif;
+  --font-family-quote: 'Lora', serif;
+}
 
 @tailwind base;
 @tailwind components;
@@ -6,75 +37,84 @@
 
 @layer base {
   :root {
-    /* LIGHT — "temple parchment": sacred violet + antique gold foundation,
-       saffron & magenta reserved as warm accents. */
-    --background: 40 44% 96%;              /* warm parchment #FAF7F0 */
-    --foreground: 260 44% 13%;             /* deep indigo ink */
-    --card: 40 46% 99%;
-    --card-foreground: 260 44% 13%;
-    --popover: 40 46% 99%;
-    --popover-foreground: 260 44% 13%;
-    --primary: 258 60% 42%;               /* sacred violet #4F2EA8 */
-    --primary-foreground: 40 50% 98%;
-    --secondary: 325 74% 42%;             /* magenta / kumkum #c02679 */
-    --secondary-foreground: 40 50% 98%;
-    --muted: 40 30% 90%;
-    --muted-foreground: 260 16% 40%;
-    --accent: 40 72% 44%;                 /* antique gold #C99A2E */
-    --accent-foreground: 40 50% 98%;
+    /* LIGHT — "celestial temple": deep cosmic midnight blue foundation,
+       sacred gold as the primary accent, warm orange reserved for CTAs. */
+    --background: 40 55% 96%;              /* warm cream page #FAF6EE */
+    --foreground: 244 49% 13%;             /* deep midnight blue ink */
+    --card: 0 0% 100%;
+    --card-foreground: 244 49% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 244 49% 13%;
+    --primary: 244 49% 13%;               /* deep cosmic midnight blue #131131 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 37 64% 47%;              /* sacred gold / ochre #C58B2B */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 40 35% 93%;
+    --muted-foreground: 0 0% 0%;
+    --accent: 37 64% 47%;                 /* sacred gold #C58B2B */
+    --accent-foreground: 0 0% 100%;
     --destructive: 0 72% 48%;
     --destructive-foreground: 40 50% 98%;
-    --border: 40 26% 84%;
-    --input: 40 26% 84%;
-    --ring: 258 60% 42%;
+    --border: 43 30% 91%;
+    --input: 43 40% 78%;
+    --ring: 244 49% 13%;
     --radius: 0.75rem;
 
-    /* Extended palette — foundation + warm accents */
-    --violet-deep: 258 60% 42%;           /* primary foundation */
-    --indigo-night: 258 58% 12%;
-    --gold: 40 72% 44%;                   /* antique gold */
-    --gold-light: 44 82% 56%;
-    --saffron: 22 92% 52%;                /* warm accent */
-    --marigold: 42 82% 52%;
-    --vermilion: 5 78% 50%;
-    --kumkum: 355 68% 44%;
-    --magenta: 325 78% 45%;
-    --peacock: 178 60% 32%;
+    /* Extended palette — foundation + warm accents (design-system.md §1) */
+    --violet-deep: 244 49% 13%;           /* primary foundation (renamed conceptually: midnight blue) */
+    --indigo-night: 245 53% 8%;            /* footer / deepest ink */
+    --gold: 37 64% 47%;                    /* sacred gold */
+    --gold-light: 43 86% 72%;              /* warm golden badge tint */
+    --saffron: 28 80% 52%;                 /* CTA orange accent */
+    --marigold: 43 68% 68%;                /* highlighted golden border */
+    --vermilion: 28 80% 52%;
+    --kumkum: 36 66% 42%;                  /* gold text tone */
+    --magenta: 244 48% 19%;                /* primary-light navy */
+    --peacock: 244 48% 19%;
+
+    /* Direct design-system tokens for effects (design-system.md §4/§5) */
+    --shadow-card: 0 10px 30px rgba(19, 17, 49, 0.05);
+    --shadow-button: 0 4px 14px rgba(19, 17, 49, 0.15);
+    --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.12);
+    --backdrop-blur: 8px;
+    --opacity-overlay: 0.85;
+    /* --bg-pattern-page artwork is applied via inline style in Layout.js —
+       css-loader can't resolve a public-folder url() written inside a stylesheet. */
   }
 
   .dark {
-    /* DARK — "cosmic midnight": deep indigo night, violet + gold jewels,
-       saffron glow for warm accents. */
-    --background: 258 56% 7%;             /* deep cosmic indigo #0D0620 */
-    --foreground: 42 40% 91%;
-    --card: 258 42% 11%;
-    --card-foreground: 42 40% 91%;
-    --popover: 258 42% 11%;
-    --popover-foreground: 42 40% 91%;
-    --primary: 262 72% 68%;              /* violet glow */
-    --primary-foreground: 258 56% 7%;
-    --secondary: 325 72% 60%;            /* magenta glow */
-    --secondary-foreground: 42 42% 95%;
-    --muted: 258 32% 16%;
-    --muted-foreground: 42 24% 70%;
-    --accent: 44 86% 62%;               /* gold glow */
-    --accent-foreground: 258 56% 7%;
+    /* DARK — same midnight-blue + gold family as light mode, deepened and
+       glowing rather than re-hued, so both modes read as one brand. */
+    --background: 245 45% 7%;             /* deepest cosmic ink #0C0A21 */
+    --foreground: 42 40% 92%;
+    --card: 244 32% 11%;
+    --card-foreground: 42 40% 92%;
+    --popover: 244 32% 11%;
+    --popover-foreground: 42 40% 92%;
+    --primary: 244 55% 68%;               /* midnight blue, lightened to glow */
+    --primary-foreground: 245 45% 8%;
+    --secondary: 37 64% 55%;              /* gold, brightened */
+    --secondary-foreground: 245 45% 8%;
+    --muted: 244 20% 16%;
+    --muted-foreground: 42 20% 70%;
+    --accent: 40 75% 60%;                 /* gold glow */
+    --accent-foreground: 245 45% 8%;
     --destructive: 0 66% 52%;
     --destructive-foreground: 42 42% 95%;
-    --border: 258 30% 20%;
-    --input: 258 30% 20%;
-    --ring: 262 72% 68%;
+    --border: 244 25% 18%;
+    --input: 244 25% 18%;
+    --ring: 244 55% 68%;
 
-    --violet-deep: 262 72% 68%;
-    --indigo-night: 258 58% 10%;
-    --gold: 44 86% 62%;
-    --gold-light: 46 90% 68%;
-    --saffron: 28 95% 60%;
-    --marigold: 40 88% 58%;
-    --vermilion: 8 82% 58%;
-    --kumkum: 350 72% 56%;
-    --magenta: 325 72% 60%;
-    --peacock: 176 56% 46%;
+    --violet-deep: 244 55% 68%;
+    --indigo-night: 245 45% 6%;
+    --gold: 40 75% 60%;
+    --gold-light: 43 88% 70%;
+    --saffron: 28 90% 60%;
+    --marigold: 43 80% 66%;
+    --vermilion: 28 90% 60%;
+    --kumkum: 37 70% 55%;
+    --magenta: 244 40% 30%;
+    --peacock: 244 40% 30%;
   }
 }
 
@@ -82,7 +122,7 @@
   * { @apply border-border; }
   html, body {
     @apply bg-background text-foreground;
-    font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -90,12 +130,15 @@
      sticky header unreliable in Chrome. Full-bleed elements are clipped at the
      section level via overflow-hidden instead. */
   h1, h2, h3, h4 {
-    font-family: 'Fraunces', 'Cormorant Garamond', ui-serif, Georgia, serif;
+    font-family: 'Eczar', ui-serif, Georgia, serif;
     letter-spacing: -0.015em;
-    font-variation-settings: "opsz" 144;
   }
-  .font-display { font-family: 'Fraunces', 'Cormorant Garamond', serif; font-variation-settings: "opsz" 144; }
-  .font-editorial { font-family: 'Cormorant Garamond', serif; }
+  /* Secondary section headings (design-system.md --font-family-heading) */
+  .font-display { font-family: 'Eczar', serif; }
+  /* Front-page & main hero headings only (design-system.md --font-family-display) */
+  .font-hero { font-family: 'Yatra One', cursive; letter-spacing: 0; }
+  /* Italic quotes & mantras (design-system.md --font-family-quote) */
+  .font-editorial { font-family: 'Lora', serif; }
   .font-devanagari { font-family: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif; }
   .devanagari-body { font-family: 'Noto Serif Devanagari', serif; line-height: 1.9; }
 }
@@ -117,21 +160,21 @@
 }
 
 /* ---------- Backgrounds & auras ---------- */
+/* Celestial artwork layer is applied inline (see Layout.js) so this stays a
+   plain fallback color/gradient when no image is set. */
 .bg-parchment {
-  background:
-    radial-gradient(1200px circle at 12% 8%, hsl(258 60% 42% / 0.10), transparent 45%),
-    radial-gradient(900px circle at 85% 12%, hsl(40 72% 48% / 0.12), transparent 50%),
-    radial-gradient(1000px circle at 50% 100%, hsl(325 78% 45% / 0.08), transparent 55%),
-    hsl(var(--background));
+  background: hsl(var(--background));
 }
 .dark .bg-parchment {
   background:
-    radial-gradient(1200px circle at 12% 8%, hsl(262 72% 60% / 0.16), transparent 45%),
-    radial-gradient(900px circle at 85% 12%, hsl(44 86% 62% / 0.10), transparent 50%),
-    radial-gradient(1000px circle at 50% 100%, hsl(325 72% 58% / 0.12), transparent 55%),
+    radial-gradient(1200px circle at 12% 8%, hsl(244 55% 55% / 0.16), transparent 45%),
+    radial-gradient(900px circle at 85% 12%, hsl(40 75% 60% / 0.10), transparent 50%),
+    radial-gradient(1000px circle at 50% 100%, hsl(28 90% 55% / 0.10), transparent 55%),
     hsl(var(--background));
 }
-
+.text-muted-foreground {
+  font-weight: 500;
+}
 .noise-overlay {
   position: relative;
 }
@@ -143,24 +186,41 @@
   mix-blend-mode: overlay;
 }
 
-/* Cosmic orbs for dark hero */
+/* Dark-mode video backdrop — dimmed + vignetted to sit quietly behind content */
+.dark-video-layer {
+  position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+}
+.dark-video-layer video {
+  width: 100%; height: 100%; object-fit: cover; opacity: 0.32;
+}
+.dark-video-layer::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(1200px circle at 50% 15%, hsl(244 40% 14% / 0.15), hsl(var(--background) / 0.82) 70%);
+}
+
+/* Navbar glow — keeps the pill from merging into the dark video backdrop */
+.dark .navbar-glow {
+  box-shadow: 0 0 0 1px hsl(244 55% 65% / 0.12), 0 6px 28px -6px hsl(244 55% 60% / 0.28), 0 2px 16px -4px hsl(40 75% 60% / 0.12);
+}
+
+/* Cosmic orbs — gold + midnight-blue accents */
 .orb {
   position: absolute; border-radius: 999px; filter: blur(70px); opacity: 0.55; pointer-events: none;
 }
-.orb-saffron { background: radial-gradient(circle, hsl(22 92% 55%), transparent 70%); }
-.orb-magenta { background: radial-gradient(circle, hsl(325 78% 55%), transparent 70%); }
-.orb-gold    { background: radial-gradient(circle, hsl(44 86% 60%), transparent 70%); }
-.orb-violet  { background: radial-gradient(circle, hsl(262 66% 58%), transparent 70%); }
+.orb-saffron { background: radial-gradient(circle, hsl(28 80% 55%), transparent 70%); }
+.orb-magenta { background: radial-gradient(circle, hsl(43 86% 65%), transparent 70%); }
+.orb-gold    { background: radial-gradient(circle, hsl(37 64% 55%), transparent 70%); }
+.orb-violet  { background: radial-gradient(circle, hsl(244 49% 30%), transparent 70%); }
 
-/* Sacred geometry container — violet + gold foundation with warm accents */
+/* Sacred geometry container — midnight blue + gold foundation with orange accent */
 .mandala {
   position: absolute; width: 640px; height: 640px; pointer-events: none;
   background: conic-gradient(from 0deg,
-    hsl(258 60% 45% / 0.12) 0deg,
-    hsl(40 72% 50% / 0.10) 90deg,
-    hsl(325 78% 48% / 0.08) 180deg,
-    hsl(22 92% 52% / 0.08) 270deg,
-    hsl(258 60% 45% / 0.12) 360deg);
+    hsl(244 49% 20% / 0.12) 0deg,
+    hsl(37 64% 50% / 0.10) 90deg,
+    hsl(43 68% 60% / 0.08) 180deg,
+    hsl(28 80% 52% / 0.08) 270deg,
+    hsl(244 49% 20% / 0.12) 360deg);
   border-radius: 999px; filter: blur(40px); animation: slow-spin 60s linear infinite;
 }
 @keyframes slow-spin { to { transform: rotate(360deg); } }
@@ -169,55 +229,59 @@
 /* Glass */
 .glass {
   background: hsl(var(--card) / 0.75);
-  backdrop-filter: blur(24px) saturate(1.3);
-  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  backdrop-filter: blur(calc(var(--backdrop-blur) * 3)) saturate(1.3);
+  -webkit-backdrop-filter: blur(calc(var(--backdrop-blur) * 3)) saturate(1.3);
   border: 1px solid hsl(var(--border) / 0.6);
 }
 .glass-strong {
   background: hsl(var(--card) / 0.92);
-  backdrop-filter: blur(28px) saturate(1.4);
+  backdrop-filter: blur(calc(var(--backdrop-blur) * 3.5)) saturate(1.4);
   border: 1px solid hsl(var(--border));
 }
 
-/* Gradient utilities
-   - "hot"    = warm accent (saffron→magenta→gold) for CTAs & energy
-   - "cosmic" = sacred brand gradient (violet→gold→saffron)
-   - "sacred" = deep foundation (violet→indigo→magenta)
-   - "gold"   = antique gold sheen */
+/* Gradient utilities (design-system.md §1 gradients)
+   - "hot"    = warm accent (orange→gold) for CTAs & energy
+   - "cosmic" = sacred brand gradient (midnight blue→gold→orange)
+   - "sacred" = deep foundation (midnight blue shades)
+   - "gold"   = sacred gold sheen (--gradient-gold-tag) */
 .text-gradient-hot {
-  background: linear-gradient(120deg, hsl(22 92% 52%), hsl(325 78% 52%), hsl(42 82% 52%));
+  background: linear-gradient(120deg, hsl(28 80% 52%), hsl(37 64% 47%), hsl(43 86% 60%));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .text-gradient-cosmic {
-  background: linear-gradient(120deg, hsl(258 62% 56%), hsl(40 78% 52%), hsl(22 92% 55%));
+  background: linear-gradient(120deg, hsl(244 49% 20%), hsl(37 64% 47%), hsl(28 80% 52%));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .dark .text-gradient-cosmic {
-  background: linear-gradient(120deg, hsl(262 74% 72%), hsl(44 88% 64%), hsl(28 95% 62%));
+  background: linear-gradient(120deg, hsl(244 55% 72%), hsl(40 75% 64%), hsl(28 90% 62%));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .text-gradient-gold {
-  background: linear-gradient(120deg, hsl(40 72% 46%), hsl(46 86% 60%), hsl(38 70% 44%));
+  background: linear-gradient(135deg, hsl(43 86% 84%), hsl(43 86% 65%));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .bg-gradient-hot {
-  background: linear-gradient(120deg, hsl(22 92% 52%), hsl(325 78% 45%));
+  background: linear-gradient(120deg, hsl(28 80% 52%), hsl(37 64% 42%));
 }
 .bg-gradient-sacred {
-  background: linear-gradient(120deg, hsl(258 60% 42%), hsl(268 58% 32%), hsl(325 68% 42%));
+  background: linear-gradient(120deg, hsl(244 49% 13%), hsl(244 55% 20%), hsl(37 64% 35%));
 }
 .bg-gradient-cosmic {
-  background: linear-gradient(135deg, hsl(258 60% 15%), hsl(268 62% 25%), hsl(325 60% 22%));
+  background: linear-gradient(135deg, hsl(244 49% 10%), hsl(244 55% 18%), hsl(37 60% 22%));
 }
 .bg-gradient-gold {
-  background: linear-gradient(120deg, hsl(40 72% 46%), hsl(46 84% 56%));
+  background: linear-gradient(135deg, hsl(43 86% 84%), hsl(43 86% 65%));
 }
 
 /* Overlines */
-.overline {
-  font-family: 'Manrope', sans-serif;
+.eyebrow {
+  font-family: 'Plus Jakarta Sans', sans-serif;
   font-size: 0.7rem; letter-spacing: 0.24em; text-transform: uppercase;
   font-weight: 600;
+  /* Same gold hue as --accent, darkened for AA contrast on the light cream background. */
+  color: hsl(37 64% 32%);
+}
+.dark .eyebrow {
   color: hsl(var(--accent));
 }
 
@@ -235,11 +299,11 @@
 }
 .card-elevated:hover {
   transform: translateY(-4px);
-  box-shadow: 0 22px 48px -22px hsl(258 60% 32% / 0.40);
+  box-shadow: 0 22px 48px -22px hsl(244 49% 13% / 0.40);
   border-color: hsl(var(--accent));
 }
 .dark .card-elevated:hover {
-  box-shadow: 0 22px 48px -20px hsl(262 72% 50% / 0.45);
+  box-shadow: 0 22px 48px -20px hsl(244 55% 55% / 0.45);
 }
 
 /* Ritual japa dot */

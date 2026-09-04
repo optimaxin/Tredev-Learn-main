@@ -50,30 +50,30 @@ export default function MantraBuilder({ onSaved }) {
 
       <div className="grid md:grid-cols-2 gap-4">
         <div>
-          <label className="overline">Deity / god name</label>
+          <label className="eyebrow">Deity / god name</label>
           <Input list="deity-list" value={m.deity} onChange={(e)=>set({deity:e.target.value})} className="mt-2 h-11" placeholder="e.g. Shiva" data-testid="mantra-deity" />
           <datalist id="deity-list">{COMMON_DEITIES.map((d)=><option key={d} value={d} />)}</datalist>
           <p className="text-[11px] text-muted-foreground mt-1">Auto-links to festivals with the same deity.</p>
         </div>
         <div>
-          <label className="overline">Title</label>
+          <label className="eyebrow">Title</label>
           <Input value={m.title} onChange={(e)=>set({title:e.target.value})} className="mt-2 h-11" placeholder="e.g. Mahāmṛtyuñjaya Mantra" data-testid="mantra-title" />
         </div>
       </div>
       <div>
-        <label className="overline">Devanāgarī</label>
+        <label className="eyebrow">Devanāgarī</label>
         <Textarea value={m.devanagari} onChange={(e)=>set({devanagari:e.target.value})} className="mt-2 min-h-[80px] font-devanagari text-lg" data-testid="mantra-devanagari" />
       </div>
       <div>
-        <label className="overline">Transliteration (IAST)</label>
+        <label className="eyebrow">Transliteration (IAST)</label>
         <Textarea value={m.iast} onChange={(e)=>set({iast:e.target.value})} className="mt-2 min-h-[60px] font-editorial italic" />
       </div>
       <div>
-        <label className="overline">Meaning</label>
+        <label className="eyebrow">Meaning</label>
         <Textarea value={m.meaning} onChange={(e)=>set({meaning:e.target.value})} className="mt-2 min-h-[60px]" />
       </div>
       <div>
-        <label className="overline">Recitation audio</label>
+        <label className="eyebrow">Recitation audio</label>
         <div className="mt-2 flex items-center gap-3 flex-wrap">
           <label className="inline-flex items-center gap-2 text-sm rounded-full border border-border px-4 h-10 cursor-pointer hover:bg-muted transition-colors">
             <UploadCloud className="w-4 h-4" /> {m.audio_url ? "Replace audio" : "Upload audio"}
