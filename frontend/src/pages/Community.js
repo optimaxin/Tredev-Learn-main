@@ -31,7 +31,7 @@ export default function Community() {
   const loadChannels = async (preferId) => {
     try {
       const { data } = await api.get("/channels");
-      const list = data.channels || [];
+      const list = Array.isArray(data?.channels) ? data.channels : [];
       setChannels(list);
       if (preferId !== undefined && list.some((c) => c.id === preferId)) {
         setSelectedChannelId(preferId);
@@ -80,7 +80,7 @@ export default function Community() {
   useEffect(() => {
     if (!selectedChannel || selectedChannel.locked) { setMessages([]); setHasMore(false); return; }
     api.get(`/channels/${selectedChannel.id}/messages`)
-      .then(({ data }) => { setMessages(data.messages || []); setHasMore(!!data.has_more); })
+      .then(({ data }) => { setMessages(Array.isArray(data?.messages) ? data.messages : []); setHasMore(!!data?.has_more); })
       .catch((err) => toast.error(formatApiError(err)));
   }, [selectedChannelId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -89,8 +89,8 @@ export default function Community() {
     const before = messages[0].created_at;
     try {
       const { data } = await api.get(`/channels/${selectedChannel.id}/messages`, { params: { before, limit: 50 } });
-      setMessages((prev) => [...(data.messages || []), ...prev]);
-      setHasMore(!!data.has_more);
+      setMessages((prev) => [...(Array.isArray(data?.messages) ? data.messages : []), ...prev]);
+      setHasMore(!!data?.has_more);
     } catch (err) {
       toast.error(formatApiError(err));
     }

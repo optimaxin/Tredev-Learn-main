@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import SadhanaCounter from "@/components/SadhanaCounter";
+import VideoPlayer from "@/components/VideoPlayer";
 import { CheckCircle2, Circle, PlayCircle, Award, ClipboardList, Radio, Video } from "lucide-react";
 
 const certLabel = (t, status) => ({
@@ -33,17 +34,18 @@ export default function CourseWorkspace({ offeringId }) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [sessions, setSessions] = useState([]);
   const [joiningId, setJoiningId] = useState(null);
+  const reportedRef = useRef(new Set()); // lesson ids already reported attended this session
 
   const load = async () => {
     const { data } = await api.get(`/offerings/${offeringId}`);
     setOffering(data);
     const my = await api.get("/enrollments/mine").catch(() => ({ data: [] }));
-    const en = my.data.find((e) => e.offering_id === offeringId);
+    const en = (Array.isArray(my.data) ? my.data : []).find((e) => e.offering_id === offeringId);
     setCompleted(en?.completed_lessons || []);
     const mc = await api.get("/certificates/mine-all").catch(() => ({ data: [] }));
-    setMyCert(mc.data.find((c) => c.offering_id === offeringId && !c.revoked) || null);
+    setMyCert((Array.isArray(mc.data) ? mc.data : []).find((c) => c.offering_id === offeringId && !c.revoked) || null);
     const ls = await api.get("/live-sessions/mine-learner").catch(() => ({ data: [] }));
-    setSessions(ls.data.filter((s) => s.offering_id === offeringId));
+    setSessions((Array.isArray(ls.data) ? ls.data : []).filter((s) => s.offering_id === offeringId));
     if (data.type === "sadhana") {
       const s = await api.get(`/sadhana/${offeringId}`).catch(() => null);
       if (s) setSadhana(s.data);
@@ -64,12 +66,15 @@ export default function CourseWorkspace({ offeringId }) {
     }).catch(() => {});
   }, [offering, completed, offeringId]);
 
-  const toggleLesson = async (lessonId) => {
-    const done = !completed.includes(lessonId);
-    try {
-      const { data } = await api.post(`/enrollments/${offeringId}/complete-lesson`, { lesson_id: lessonId, done });
-      setCompleted(data.completed_lessons);
-    } catch (e) { toast.error(formatApiError(e)); }
+  // Auto-attendance: called with the highest % watched so far as the video plays.
+  // Reports once per lesson per session, only once the 80% threshold is crossed —
+  // the backend is the source of truth for whether that's enough to mark it attended.
+  const onWatchProgress = (lessonId) => (pct) => {
+    if (pct < 80 || reportedRef.current.has(lessonId)) return;
+    reportedRef.current.add(lessonId);
+    api.post(`/enrollments/${offeringId}/lessons/${lessonId}/watch-progress`, { watched_pct: pct })
+      .then(({ data }) => setCompleted(data.completed_lessons))
+      .catch(() => { reportedRef.current.delete(lessonId); });
   };
 
   const requestCertificate = async () => {
@@ -225,7 +230,7 @@ export default function CourseWorkspace({ offeringId }) {
           <div data-testid="lesson-player">
             <div className="text-2xl font-serif mb-4">{active.title || t("courseWorkspace.untitledLesson")}</div>
             {active.video_url ? (
-              <video key={activeId} src={active.video_url} controls className="w-full rounded-xl border border-border bg-black aspect-video" />
+              <VideoPlayer key={activeId} offeringId={offeringId} lessonId={activeId} onWatchProgress={onWatchProgress(activeId)} />
             ) : (
               <div className="w-full rounded-xl border border-dashed border-border aspect-video flex items-center justify-center text-muted-foreground text-sm">
                 {t("courseWorkspace.noVideo")}
@@ -243,11 +248,9 @@ export default function CourseWorkspace({ offeringId }) {
                   {t("courseWorkspace.next")} →
                 </Button>
               </div>
-              <Button size="sm" variant={activeDone ? "default" : "outline"} onClick={() => toggleLesson(activeId)}
-                data-testid="lesson-complete-toggle"
-                className={`rounded-full ${activeDone ? "bg-primary text-primary-foreground border-0" : ""}`}>
-                {activeDone ? <><Award className="w-4 h-4 mr-1" />{t("courseWorkspace.completed")}</> : t("courseWorkspace.markComplete")}
-              </Button>
+              <Badge variant={activeDone ? "default" : "outline"} data-testid="lesson-attendance-status" className="text-xs">
+                {activeDone ? <><Award className="w-3.5 h-3.5 mr-1 inline" />{t("courseWorkspace.completed")}</> : t("courseWorkspace.notYetAttended")}
+              </Badge>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import axios from "axios";
+git add .import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -14,6 +14,15 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem("tredev_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
+});
+
+// backend not deployed yet -> misrouted requests resolve with the SPA's index.html
+// (a string) instead of JSON; turn that into a rejection so existing .catch() paths handle it
+api.interceptors.response.use((response) => {
+  if (typeof response.data === "string") {
+    return Promise.reject(new Error("Backend unavailable: expected JSON, got non-JSON response"));
+  }
+  return response;
 });
 
 export default api;

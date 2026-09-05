@@ -48,6 +48,9 @@ CHAT_MEDIA_BUCKET = os.environ.get("CHAT_MEDIA_BUCKET", "chat-media")
 # to the browser so the real API key never leaves the server.
 BUNNY_LIBRARY_ID = os.environ.get("BUNNY_LIBRARY_ID", "")
 BUNNY_STREAM_API_KEY = os.environ.get("BUNNY_STREAM_API_KEY", "")
+# Signs short-lived embed-view tokens for playback (separate from the upload API key).
+# Must match the "Token Authentication" security key set on the Stream library in Bunny's dashboard.
+BUNNY_TOKEN_SECURITY_KEY = os.environ.get("BUNNY_TOKEN_SECURITY_KEY", "")
 
 
 def ObjectId(x):
@@ -189,9 +192,8 @@ class ConsultationIn(BaseModel):
     interest: str
     consent: bool
 
-class LessonProgressIn(BaseModel):
-    lesson_id: str
-    done: bool = True
+class LessonWatchIn(BaseModel):
+    watched_pct: float
 
 class EnrollIn(BaseModel):
     offering_id: str
@@ -347,6 +349,7 @@ class SignUploadIn(BaseModel):
 
 class BunnyVideoSignIn(BaseModel):
     title: Optional[str] = ""
+    offering_id: Optional[str] = None
 
 class ApprovalDecisionIn(BaseModel):
     approved: bool
@@ -675,26 +678,64 @@ async def my_enrollments(user: dict = Depends(get_current_user)):
     return result
 
 
-@api_router.post("/enrollments/{offering_id}/complete-lesson")
-async def complete_lesson(offering_id: str, data: LessonProgressIn,
-                          user: dict = Depends(get_current_user)):
-    """Toggle a lesson's completion for the learner and recompute progress %."""
+LESSON_ATTENDANCE_THRESHOLD_PCT = 80
+
+
+@api_router.post("/enrollments/{offering_id}/lessons/{lesson_id}/watch-progress")
+async def record_lesson_watch(offering_id: str, lesson_id: str, data: LessonWatchIn,
+                               user: dict = Depends(get_current_user)):
+    """Auto-attendance: the player reports how far into a lesson the learner has
+    watched. Once they cross the threshold the lesson is marked attended/complete
+    — this is the sole way completed_lessons gets updated (no self-reported
+    "mark complete" click any more, so course progress/attendance is trustworthy)."""
     e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
     if not e:
         raise HTTPException(404, "Not enrolled in this course")
     done_ids = list(e.get("completed_lessons") or [])
-    if data.done and data.lesson_id not in done_ids:
-        done_ids.append(data.lesson_id)
-    elif not data.done and data.lesson_id in done_ids:
-        done_ids.remove(data.lesson_id)
-    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
-    total = len(o.get("modules") or []) if o else 0
-    progress = round(len(done_ids) / total * 100) if total else 0
-    status = "completed" if total and len(done_ids) >= total else "active"
-    await db.enrollments.update_one(
-        {"user_id": user["id"], "offering_id": offering_id},
-        {"$set": {"completed_lessons": done_ids, "progress": progress, "status": status}})
-    return {"ok": True, "completed_lessons": done_ids, "progress": progress, "status": status}
+    if data.watched_pct >= LESSON_ATTENDANCE_THRESHOLD_PCT and lesson_id not in done_ids:
+        done_ids.append(lesson_id)
+        o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+        total = len(o.get("modules") or []) if o else 0
+        progress = round(len(done_ids) / total * 100) if total else 0
+        status = "completed" if total and len(done_ids) >= total else "active"
+        await db.enrollments.update_one(
+            {"user_id": user["id"], "offering_id": offering_id},
+            {"$set": {"completed_lessons": done_ids, "progress": progress, "status": status}})
+        return {"completed_lessons": done_ids, "progress": progress, "status": status}
+    return {"completed_lessons": done_ids, "progress": e.get("progress", 0), "status": e.get("status", "active")}
+
+
+@api_router.get("/learner/performance")
+async def learner_performance(user: dict = Depends(get_current_user)):
+    """Performance = attendance (lessons watched >=80%) + assignment score, averaged.
+    Attendance reuses the same completed_lessons/modules signal already driving
+    each course's progress bar; assignment score is the learner's own graded quiz
+    attempts across every course."""
+    enrollments = await db.enrollments.find({"user_id": user["id"]}).to_list(500)
+    total_lessons = 0
+    done_lessons = 0
+    for e in enrollments:
+        o = await db.offerings.find_one({"_id": ObjectId(e["offering_id"])})
+        total_lessons += len(o.get("modules") or []) if o else 0
+        done_lessons += len(e.get("completed_lessons") or [])
+    attendance_pct = round(done_lessons / total_lessons * 100) if total_lessons else 0
+
+    # `score` on a quiz_attempt is already a 0-100 percentage (not raw points —
+    # `total_score` there is the attempt's max point value, a different scale).
+    attempts = await db.quiz_attempts.find({"user_id": user["id"], "status": "graded"}).to_list(500)
+    graded = [a for a in attempts if a.get("score") is not None]
+    quiz_avg_pct = round(sum(a["score"] for a in graded) / len(graded)) if graded else None
+
+    parts = [p for p in (attendance_pct, quiz_avg_pct) if p is not None]
+    performance_pct = round(sum(parts) / len(parts)) if parts else 0
+    return {
+        "attendance_pct": attendance_pct,
+        "quiz_avg_pct": quiz_avg_pct,
+        "performance_pct": performance_pct,
+        "lessons_attended": done_lessons,
+        "total_lessons": total_lessons,
+        "graded_assignments": len(graded),
+    }
 
 
 # ==================== SADHANA ====================
@@ -2527,6 +2568,28 @@ async def sign_upload(data: SignUploadIn,
             "content_type": data.content_type}
 
 
+async def ensure_bunny_collection(offering: dict) -> Optional[str]:
+    """Lazily create this course's Bunny Stream collection (a folder in the library
+    dashboard) on first use, and persist the guid — so we only ever call Bunny for
+    courses that actually get a video, not on every course view."""
+    existing = offering.get("bunny_collection_id")
+    if existing:
+        return existing
+    try:
+        resp = requests.post(
+            f"https://video.bunnycdn.com/library/{BUNNY_LIBRARY_ID}/collections",
+            headers={"AccessKey": BUNNY_STREAM_API_KEY, "Content-Type": "application/json"},
+            json={"name": offering.get("title") or "Untitled course"}, timeout=15,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Bunny request failed: {e}")
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"Could not create collection ({resp.status_code}): {resp.text[:200]}")
+    collection_id = resp.json().get("guid")
+    await db.offerings.update_one({"_id": offering["id"]}, {"$set": {"bunny_collection_id": collection_id}})
+    return collection_id
+
+
 @api_router.post("/lectures/video/sign")
 async def sign_lecture_video(data: BunnyVideoSignIn,
                               actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
@@ -2537,11 +2600,20 @@ async def sign_lecture_video(data: BunnyVideoSignIn,
         raise HTTPException(403, "Offerings has not been granted to you by admin — ask an admin to grant the 'offerings' capability.")
     if not BUNNY_LIBRARY_ID or not BUNNY_STREAM_API_KEY:
         raise HTTPException(503, "Video hosting is not configured (set BUNNY_LIBRARY_ID and BUNNY_STREAM_API_KEY in backend/.env).")
+    collection_id = None
+    if data.offering_id:
+        offering = await db.offerings.find_one({"_id": ObjectId(data.offering_id)})
+        if not offering:
+            raise HTTPException(404, "Course not found")
+        collection_id = await ensure_bunny_collection(offering)
+    video_body = {"title": data.title or "Untitled lecture"}
+    if collection_id:
+        video_body["collectionId"] = collection_id
     try:
         resp = requests.post(
             f"https://video.bunnycdn.com/library/{BUNNY_LIBRARY_ID}/videos",
             headers={"AccessKey": BUNNY_STREAM_API_KEY, "Content-Type": "application/json"},
-            json={"title": data.title or "Untitled lecture"}, timeout=15,
+            json=video_body, timeout=15,
         )
     except Exception as e:
         raise HTTPException(502, f"Bunny request failed: {e}")
@@ -2558,6 +2630,68 @@ async def sign_lecture_video(data: BunnyVideoSignIn,
         "expire": expire,
         "playback_url": f"https://iframe.mediadelivery.net/embed/{BUNNY_LIBRARY_ID}/{video_id}",
     }
+
+
+def _bunny_embed_token_url(video_id: str) -> dict:
+    if not BUNNY_TOKEN_SECURITY_KEY:
+        raise HTTPException(503, "Video playback is not configured (set BUNNY_TOKEN_SECURITY_KEY in backend/.env).")
+    expiration = int(time.time()) + 7200
+    token = hashlib.sha256(f"{BUNNY_TOKEN_SECURITY_KEY}{video_id}{expiration}".encode()).hexdigest()
+    return {
+        "provider": "bunny",
+        "embed_url": f"https://iframe.mediadelivery.net/embed/{BUNNY_LIBRARY_ID}/{video_id}?token={token}&expires={expiration}",
+    }
+
+
+@api_router.get("/lectures/video/{video_id}/preview-token")
+async def preview_lecture_video(video_id: str,
+                                 actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Staff's own immediate post-upload preview — mints a token straight from the
+    video id, with no offering/lesson lookup, since the lesson may not be saved yet
+    (e.g. a brand-new course draft). Same edit permission as uploading it."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "offerings"):
+        raise HTTPException(403, "Offerings has not been granted to you by admin — ask an admin to grant the 'offerings' capability.")
+    return _bunny_embed_token_url(video_id)
+
+
+def _find_lesson(offering: dict, lesson_id: str) -> Optional[dict]:
+    modules = offering.get("modules") or []
+    for m in modules:
+        if str(m.get("id", "")) == lesson_id:
+            return m
+    try:
+        return modules[int(lesson_id)]
+    except (ValueError, IndexError, TypeError):
+        return None
+
+
+@api_router.get("/offerings/{offering_id}/lessons/{lesson_id}/play")
+async def get_lesson_playback(offering_id: str, lesson_id: str,
+                               actor: dict = Depends(get_current_user)):
+    """Mint a short-lived Bunny embed-view token for one lesson — only for viewers
+    who are actually allowed to see this course: an enrolled learner, staff, or the
+    course's own Ācharya. This is the actual enrollment gate; the lesson's raw
+    video_url is never handed out un-checked."""
+    offering = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    if not offering:
+        raise HTTPException(404, "Course not found")
+    lesson = _find_lesson(offering, lesson_id)
+    if not lesson:
+        raise HTTPException(404, "Lesson not found")
+
+    is_enrolled = await db.enrollments.find_one({"user_id": actor["id"], "offering_id": offering_id})
+    is_staff = actor.get("role") in ("academic_staff", "admin", "super_admin")
+    is_owning_acharya = actor.get("role") == "acharya" and offering.get("acharya_id") == actor["id"]
+    if not (is_enrolled or is_staff or is_owning_acharya):
+        raise HTTPException(403, "Not enrolled in this course")
+
+    if lesson.get("video_provider") != "bunny":
+        return {"provider": lesson.get("video_provider") or "url", "video_url": lesson.get("video_url")}
+
+    video_id = lesson.get("video_path")
+    if not video_id:
+        raise HTTPException(404, "This lesson has no video")
+    return _bunny_embed_token_url(video_id)
 
 
 # ==================== ROOT ====================

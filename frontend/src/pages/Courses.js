@@ -16,7 +16,7 @@ export default function Courses() {
   const type = params.get("type") || "all";
 
   useEffect(() => {
-    api.get("/offerings").then((r) => setItems(r.data)).catch(() => {});
+    api.get("/offerings").then((r) => setItems(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
   const filtered = useMemo(() => items.filter((o) => {

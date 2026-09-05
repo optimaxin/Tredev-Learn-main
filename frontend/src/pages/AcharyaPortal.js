@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import VideoPlayer from "@/components/VideoPlayer";
 import { CheckCircle2, XCircle, Video, Radio, ScrollText, Award, FileText, PlusCircle, BookOpen, PenLine, Stamp } from "lucide-react";
 
 const CONTENT_KINDS = [
@@ -37,20 +38,20 @@ export default function AcharyaPortal() {
 
   const load = async () => {
     const [o, s, c, sc, pc] = await Promise.all([
-      api.get("/offerings?published_only=false"),
+      api.get("/offerings?published_only=false").catch(() => ({ data: [] })),
       api.get("/live-sessions/mine-acharya").catch(() => ({ data: [] })),
       api.get("/acharya/content").catch(() => ({ data: [] })),
       api.get("/certificates/signed-by-me").catch(() => ({ data: [] })),
       api.get("/certificates/pending-signature").catch(() => ({ data: [] })),
     ]);
-    const mine = o.data.filter((x) => x.acharya_id === user?.id);
+    const mine = (Array.isArray(o.data) ? o.data : []).filter((x) => x.acharya_id === user?.id);
     setOfferings(mine);
     setPending(mine.filter((x) => !x.approved_by_acharya));
     setApproved(mine.filter((x) => x.approved_by_acharya));
-    setSessions(s.data);
-    setContentSubmissions(c.data);
-    setSignedCerts(sc.data);
-    setPendingCerts(pc.data);
+    setSessions(Array.isArray(s.data) ? s.data : []);
+    setContentSubmissions(Array.isArray(c.data) ? c.data : []);
+    setSignedCerts(Array.isArray(sc.data) ? sc.data : []);
+    setPendingCerts(Array.isArray(pc.data) ? pc.data : []);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (user) load(); }, [user?.id]);
@@ -136,7 +137,7 @@ export default function AcharyaPortal() {
                     <div key={m.id || i} className="rounded-xl border border-border p-4 bg-background/50" data-testid={`review-lesson-${o.id}-${i}`}>
                       <div className="font-display font-semibold">{i + 1}. {m.title || t("acharyaPortal.untitledLesson")}</div>
                       {m.video_url && (
-                        <video src={m.video_url} controls className="mt-3 w-full max-w-xl rounded-lg border border-border" />
+                        <VideoPlayer offeringId={o.id} lessonId={m.id || String(i)} className="mt-3 max-w-xl" />
                       )}
                       {m.body && (
                         <div className="mt-3 font-editorial text-sm leading-relaxed whitespace-pre-line border-l-2 border-accent/40 pl-4">{m.body}</div>

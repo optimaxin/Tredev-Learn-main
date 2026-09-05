@@ -61,14 +61,15 @@ export default function AdminPortal() {
 
   const load = async () => {
     const [u, g, a, o, f, ft] = await Promise.all([
-      api.get("/users"),
-      api.get("/capabilities"),
-      api.get("/audit-log"),
-      api.get("/offerings?published_only=false"),
-      api.get("/festivals"),
-      api.get("/feature-toggles"),
+      api.get("/users").catch(() => ({ data: [] })),
+      api.get("/capabilities").catch(() => ({ data: [] })),
+      api.get("/audit-log").catch(() => ({ data: [] })),
+      api.get("/offerings?published_only=false").catch(() => ({ data: [] })),
+      api.get("/festivals").catch(() => ({ data: [] })),
+      api.get("/feature-toggles").catch(() => ({ data: [] })),
     ]);
-    setUsers(u.data); setGrants(g.data); setAudit(a.data); setOfferings(o.data); setFestivals(f.data); setFeatures(ft.data);
+    const arr = (x) => (Array.isArray(x.data) ? x.data : []);
+    setUsers(arr(u)); setGrants(arr(g)); setAudit(arr(a)); setOfferings(arr(o)); setFestivals(arr(f)); setFeatures(arr(ft));
   };
   useEffect(() => { load(); }, []);
 

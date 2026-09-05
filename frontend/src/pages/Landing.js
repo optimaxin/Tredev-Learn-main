@@ -689,11 +689,11 @@ export default function Landing() {
 
   useEffect(() => {
     fetchDailyVerse().then(setShloka).catch(() => {});
-    api.get("/webinars").then((r) => setWebinars(r.data)).catch(() => {});
-    api.get("/offerings").then((r) => setCourses(r.data)).catch(() => {});
-    api.get("/mentors").then((r) => setMentors(r.data)).catch(() => {});
-    api.get("/testimonials").then((r) => setTestimonials(r.data)).catch(() => {});
-    api.get("/blogs").then((r) => setBlogs(r.data)).catch(() => {});
+    api.get("/webinars").then((r) => setWebinars(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    api.get("/offerings").then((r) => setCourses(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    api.get("/mentors").then((r) => setMentors(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    api.get("/testimonials").then((r) => setTestimonials(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    api.get("/blogs").then((r) => setBlogs(Array.isArray(r.data) ? r.data : [])).catch(() => {});
     api.get("/stats").then((r) => setStats(r.data)).catch(() => {});
   }, []);
 

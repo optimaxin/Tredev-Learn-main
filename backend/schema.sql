@@ -510,4 +510,8 @@ ALTER TABLE blogs      ADD COLUMN IF NOT EXISTS body_hi        text;
 ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS title_hi       text;
 ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS subtitle_hi    text;
 ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS description_hi text;
+
+-- ==================== BUNNY STREAM ====================
+-- One Bunny Stream "collection" (folder) per course, created lazily on first video upload.
+ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS bunny_collection_id text;
 CREATE INDEX IF NOT EXISTS idx_chat_channel_members_user ON chat_channel_members(user_id);

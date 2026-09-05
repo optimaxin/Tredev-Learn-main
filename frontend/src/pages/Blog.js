@@ -14,7 +14,7 @@ export default function Blog() {
 
   useEffect(() => {
     const q = cat === "all" ? "" : `?category=${cat}`;
-    api.get(`/blogs${q}`).then((r) => setPosts(r.data));
+    api.get(`/blogs${q}`).then((r) => setPosts(Array.isArray(r.data) ? r.data : [])).catch(() => setPosts([]));
   }, [cat]);
 
   return (

@@ -15,7 +15,7 @@ export default function LessonComments({ offeringId, lessonId, canAnswer }) {
 
   const load = () => {
     api.get("/doubts", { params: { offering_id: offeringId, lesson_id: lessonId } })
-      .then(({ data }) => setItems(data))
+      .then(({ data }) => setItems(Array.isArray(data) ? data : []))
       .catch(() => {});
   };
   useEffect(() => { load(); }, [offeringId, lessonId]); // eslint-disable-line react-hooks/exhaustive-deps

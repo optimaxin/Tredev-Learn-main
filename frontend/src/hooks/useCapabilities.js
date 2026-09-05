@@ -9,7 +9,7 @@ export default function useCapabilities() {
   const reload = useCallback(() => {
     setLoading(true);
     api.get("/capabilities")
-      .then(({ data }) => setGrants(data))
+      .then(({ data }) => setGrants(Array.isArray(data) ? data : []))
       .catch(() => setGrants([]))
       .finally(() => setLoading(false));
   }, []);

@@ -6,7 +6,7 @@ import MentorCard from "@/components/MentorCard";
 export default function Mentors() {
   const { t } = useTranslation();
   const [mentors, setMentors] = useState([]);
-  useEffect(() => { api.get("/mentors").then((r) => setMentors(r.data)); }, []);
+  useEffect(() => { api.get("/mentors").then((r) => setMentors(Array.isArray(r.data) ? r.data : [])).catch(() => setMentors([])); }, []);
 
   return (
     <div className="site-container py-16">

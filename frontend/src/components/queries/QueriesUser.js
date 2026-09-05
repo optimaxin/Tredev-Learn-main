@@ -24,9 +24,10 @@ export default function QueriesUser() {
   const loadTickets = useCallback(async () => {
     try {
       const { data } = await api.get("/queries/mine");
-      setTickets(data);
+      const list = Array.isArray(data) ? data : [];
+      setTickets(list);
       if (selectedIdRef.current) {
-        const fresh = data.find((tk) => tk.id === selectedIdRef.current);
+        const fresh = list.find((tk) => tk.id === selectedIdRef.current);
         if (fresh) setSelected(fresh);
       }
     } catch { /* keep last known list on a transient poll failure */ }
@@ -36,7 +37,7 @@ export default function QueriesUser() {
   const loadMessages = useCallback(async (ticketId) => {
     try {
       const { data } = await api.get(`/queries/${ticketId}/messages`);
-      if (selectedIdRef.current === ticketId) setMessages(data);
+      if (selectedIdRef.current === ticketId) setMessages(Array.isArray(data) ? data : []);
     } catch { /* keep last known thread on a transient poll failure */ }
   }, []);
 

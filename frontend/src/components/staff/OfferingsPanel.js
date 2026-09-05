@@ -7,6 +7,7 @@ import OfferingEditor from "@/components/OfferingEditor";
 import LessonManager from "@/components/LessonManager";
 import LessonComments from "@/components/LessonComments";
 import AssessmentBuilder from "@/components/AssessmentBuilder";
+import VideoPlayer from "@/components/VideoPlayer";
 
 /** Card grid of an academic staff member's offerings; clicking one opens a
  * tabbed detail view (Course details / Lessons / Assessment). Staff without
@@ -130,11 +131,7 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
                   <div key={lessonId} className="rounded-xl border border-border p-4 bg-background/60" data-testid={`staff-lesson-view-${lessonId}`}>
                     <div className="font-semibold text-sm mb-3">{i + 1}. {l.title || "Untitled lesson"}</div>
                     {l.video_url && (
-                      l.video_provider === "bunny"
-                        ? <iframe src={l.video_url} title={l.title || "Lecture video"} loading="lazy"
-                            className="w-full max-w-md aspect-video rounded-lg border border-border"
-                            allow="accelerometer; gyroscope; encrypted-media; picture-in-picture;" allowFullScreen />
-                        : <video src={l.video_url} controls className="w-full max-w-md rounded-lg border border-border" />
+                      <VideoPlayer offeringId={selected.id} lessonId={lessonId} className="max-w-md" />
                     )}
                     {l.notes_url && (
                       <a href={l.notes_url} target="_blank" rel="noopener noreferrer"

@@ -7,8 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import ShlokaPlayer from "@/components/ShlokaPlayer";
-import CourseWorkspace from "@/components/CourseWorkspace";
-import { BookOpen, Award } from "lucide-react";
+import { BookOpen, Award, GraduationCap } from "lucide-react";
 import { localized } from "@/lib/utils";
 
 export default function CourseDetail() {
@@ -28,7 +27,7 @@ export default function CourseDetail() {
     if (user) {
       try {
         const my = await api.get("/enrollments/mine");
-        setEnrolled(!!my.data.find((e) => e.offering_id === id));
+        setEnrolled(!!(Array.isArray(my.data) ? my.data : []).find((e) => e.offering_id === id));
       } catch {}
     }
   };
@@ -106,7 +105,17 @@ export default function CourseDetail() {
 
       <section className="site-container py-16">
         {enrolled ? (
-          <CourseWorkspace offeringId={id} />
+          <div className="rounded-xl border border-primary/30 bg-primary/5 p-10 text-center max-w-2xl mx-auto">
+            <GraduationCap className="w-8 h-8 mx-auto text-primary mb-3" />
+            <p className="text-sm text-foreground/80 mb-5">
+              {t("courseDetail.enrolledGoToDashboard")}
+            </p>
+            <Link to="/learner">
+              <Button className="rounded-full px-8" data-testid="go-to-dashboard">
+                {t("courseDetail.openInDashboard")}
+              </Button>
+            </Link>
+          </div>
         ) : (
           <div className="rounded-xl border border-border bg-card p-10 text-center max-w-2xl mx-auto">
             <BookOpen className="w-8 h-8 mx-auto text-primary/60 mb-3" />

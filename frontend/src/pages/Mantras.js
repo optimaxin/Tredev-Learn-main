@@ -10,7 +10,7 @@ export default function Mantras() {
   const [params, setParams] = useSearchParams();
   const deity = params.get("deity") || "all";
 
-  useEffect(() => { api.get("/mantras").then((r) => setMantras(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/mantras").then((r) => setMantras(Array.isArray(r.data) ? r.data : [])).catch(() => {}); }, []);
 
   const deities = useMemo(
     () => Array.from(new Set(mantras.map((m) => m.deity).filter(Boolean))).sort(),
