@@ -14,7 +14,7 @@ export default function MyCertificates() {
   const [certs, setCerts] = useState([]);
   const [viewing, setViewing] = useState(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (user) api.get("/certificates/mine").then((r)=>setCerts(r.data)); }, [user?.id]);
+  useEffect(() => { if (user) api.get("/certificates/mine").then((r)=>setCerts(Array.isArray(r.data) ? r.data : [])).catch(() => setCerts([])); }, [user?.id]);
 
   return (
     <div className="site-container py-16">

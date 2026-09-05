@@ -40,16 +40,16 @@ export default function Events() {
   const { user } = useAuth();
   const nav = useNavigate();
 
-  const loadWebinars = () => api.get("/webinars").then((r) => setWebinars(r.data));
+  const loadWebinars = () => api.get("/webinars").then((r) => setWebinars(Array.isArray(r.data) ? r.data : [])).catch(() => setWebinars([]));
   const loadRegs = () => user
-    ? api.get("/webinars/my-registrations").then((r) => setRegistered(new Set(r.data))).catch(() => {})
+    ? api.get("/webinars/my-registrations").then((r) => setRegistered(new Set(Array.isArray(r.data) ? r.data : []))).catch(() => {})
     : setRegistered(new Set());
 
   useEffect(() => {
     loadWebinars();
     // Quizzes appear automatically once created/published and disappear once their end time passes
     // or the quiz is deleted — the backend filters both, so this list is always current.
-    api.get("/quizzes/events").then((r) => setQuizzes(r.data)).catch(() => setQuizzes([]));
+    api.get("/quizzes/events").then((r) => setQuizzes(Array.isArray(r.data) ? r.data : [])).catch(() => setQuizzes([]));
   }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadRegs(); }, [user?.id]);

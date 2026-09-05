@@ -44,6 +44,7 @@ COLUMNS = {
         "start_date": "text", "created_at": "text", "created_by": "uuid",
         "approved_by_acharya": "bool", "approval_notes": "text", "approved_at": "text",
         "title_hi": "text", "subtitle_hi": "text", "description_hi": "text",
+        "bunny_collection_id": "text",
     },
     "enrollments": {
         "id": "uuid", "user_id": "uuid", "offering_id": "uuid", "enrolled_at": "text",

@@ -18,7 +18,7 @@ export default function MentorManager() {
 
   const load = async () => {
     const { data } = await api.get("/mentors").catch(() => ({ data: [] }));
-    setMentors(data);
+    setMentors(Array.isArray(data) ? data : []);
   };
   useEffect(() => { load(); }, []);
 

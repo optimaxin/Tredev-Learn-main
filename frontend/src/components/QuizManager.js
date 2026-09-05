@@ -138,9 +138,9 @@ export default function QuizManager({ canAuthorQuiz = true }) {
       api.get("/live-sessions").catch(() => ({ data: [] })),
       api.get("/festivals").catch(() => ({ data: [] })),
     ]);
-    setQuizzes(q.data);
-    setSessions(s.data);
-    setFestivals(f.data);
+    setQuizzes(Array.isArray(q.data) ? q.data : []);
+    setSessions(Array.isArray(s.data) ? s.data : []);
+    setFestivals(Array.isArray(f.data) ? f.data : []);
   };
   useEffect(() => { load(); }, []);
 

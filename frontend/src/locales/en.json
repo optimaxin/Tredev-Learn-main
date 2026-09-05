@@ -151,6 +151,10 @@
     "loading": "Loading…",
     "close": "Close"
   },
+  "videoPlayer": {
+    "notAuthorized": "You don't have access to this video.",
+    "loadError": "Couldn't load this video — please try again."
+  },
   "courses": {
     "catalogueBadge": "The catalogue",
     "title": "Study.",
@@ -445,6 +449,8 @@
     "taughtBy": "Taught by",
     "mockedNotice": "Payments are MOCKED for this MVP — Razorpay integration keys not yet configured.",
     "unlockNotice": "Enroll to unlock the recorded video lessons and written material for this course.",
+    "enrolledGoToDashboard": "You're enrolled — lessons and videos are watched from your Learner Dashboard.",
+    "openInDashboard": "Open in my dashboard",
     "anchoredVerses": "Anchored verses · Shloka Player",
     "anchoredVersesSubtext": "Every scriptural lesson anchored to a verse.",
     "acharyaParampara": "Ācharya · parampara",
@@ -542,7 +548,7 @@
     "previous": "Previous",
     "next": "Next",
     "completed": "Completed",
-    "markComplete": "Mark complete"
+    "notYetAttended": "Not yet attended"
   },
   "floatingChat": {
     "greeting": "🙏 Namaskāra{{name}}! How can we help today?",

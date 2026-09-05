@@ -36,7 +36,7 @@ export default function FestivalManager({ canAuthor = true }) {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const load = () => api.get("/festivals").then((r) => setFestivals(r.data || [])).catch(() => setFestivals([]));
+  const load = () => api.get("/festivals").then((r) => setFestivals(Array.isArray(r.data) ? r.data : [])).catch(() => setFestivals([]));
   useEffect(() => { load(); }, []);
 
   const onFile = (file) => {

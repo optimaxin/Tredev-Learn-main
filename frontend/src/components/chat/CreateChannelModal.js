@@ -16,7 +16,7 @@ export default function CreateChannelModal({ open, onOpenChange, onCreated }) {
   const [inviteLink, setInviteLink] = useState(null);
 
   useEffect(() => {
-    if (open) api.get("/offerings").then((r) => setCourses(r.data || [])).catch(() => {});
+    if (open) api.get("/offerings").then((r) => setCourses(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, [open]);
 
   const reset = () => { setName(""); setType("PUBLIC"); setCourseId(""); setIsReadOnly(false); setInviteLink(null); };

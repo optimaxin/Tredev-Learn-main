@@ -10,9 +10,10 @@ export default function useFeatureToggles() {
     api.get("/feature-toggles")
       .then(({ data }) => {
         const map = {};
-        data.forEach((t) => { map[t.key] = t.enabled; });
+        (Array.isArray(data) ? data : []).forEach((t) => { map[t.key] = t.enabled; });
         setToggles(map);
       })
+      .catch(() => setToggles({}))
       .finally(() => setLoading(false));
   }, []);
 

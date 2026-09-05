@@ -41,11 +41,14 @@ export default function QueriesStaff() {
       isAdmin ? api.get("/queries/all").catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
     ];
     const [u, m, a] = await Promise.all(calls);
-    setUnassigned(u.data);
-    setMine(m.data);
-    if (isAdmin) setAll(a.data);
+    const uData = Array.isArray(u.data) ? u.data : [];
+    const mData = Array.isArray(m.data) ? m.data : [];
+    const aData = Array.isArray(a.data) ? a.data : [];
+    setUnassigned(uData);
+    setMine(mData);
+    if (isAdmin) setAll(aData);
     if (selectedIdRef.current) {
-      const merged = [...u.data, ...m.data, ...(isAdmin ? a.data : [])];
+      const merged = [...uData, ...mData, ...(isAdmin ? aData : [])];
       const fresh = merged.find((t) => t.id === selectedIdRef.current);
       if (fresh) setSelected(fresh);
     }
@@ -60,13 +63,13 @@ export default function QueriesStaff() {
 
   useEffect(() => {
     if (!isAdmin) return;
-    api.get("/users").then(({ data }) => setStaffUsers(data.filter((u) => u.role === "academic_staff"))).catch(() => {});
+    api.get("/users").then(({ data }) => setStaffUsers((Array.isArray(data) ? data : []).filter((u) => u.role === "academic_staff"))).catch(() => {});
   }, [isAdmin]);
 
   const loadMessages = useCallback(async (ticketId) => {
     try {
       const { data } = await api.get(`/queries/${ticketId}/messages`);
-      if (selectedIdRef.current === ticketId) setMessages(data);
+      if (selectedIdRef.current === ticketId) setMessages(Array.isArray(data) ? data : []);
     } catch { /* keep last known thread on a transient poll failure */ }
   }, []);
 

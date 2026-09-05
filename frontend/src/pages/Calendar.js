@@ -57,10 +57,10 @@ export default function Calendar() {
   const [cursor, setCursor] = useState(() => { const d = todayStart(); d.setDate(1); return d; });
 
   useEffect(() => {
-    api.get("/festivals").then((r) => setFestivals(r.data || [])).catch(() => setFestivals([]));
+    api.get("/festivals").then((r) => setFestivals(Array.isArray(r.data) ? r.data : [])).catch(() => setFestivals([]));
     api.get("/quizzes/events").then((r) => {
       const map = {};
-      (r.data || []).forEach((q) => { if (q.festival_id) map[q.festival_id] = q; });
+      (Array.isArray(r.data) ? r.data : []).forEach((q) => { if (q.festival_id) map[q.festival_id] = q; });
       setQuizzesByFestival(map);
     }).catch(() => setQuizzesByFestival({}));
   }, []);

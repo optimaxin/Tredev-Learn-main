@@ -95,9 +95,9 @@ export default function AcademicStaffPortal() {
 
   const load = async () => {
     const [o, cn, a, con, cg, u, w, s, pc, mn] = await Promise.all([
-      api.get("/offerings?published_only=false"),
+      api.get("/offerings?published_only=false").catch(()=>({data:[]})),
       api.get("/consultations/mine").catch(()=>({data:[]})),
-      api.get("/acharyas"),
+      api.get("/acharyas").catch(()=>({data:[]})),
       api.get("/acharya/content").catch(()=>({data:[]})),
       api.get("/certificates/all-grouped").catch(()=>({data:[]})),
       api.get("/learners").catch(()=>({data:[]})),
@@ -106,16 +106,17 @@ export default function AcademicStaffPortal() {
       api.get("/certificates/requests").catch(()=>({data:[]})),
       api.get("/mantras").catch(()=>({data:[]})),
     ]);
-    setOfferings(o.data);
-    setConsultations(cn.data);
-    setAcharyas(a.data);
-    setContent(con.data);
-    setCertGroups(cg.data);
-    setUsers(u.data);
-    setWebinars(w.data);
-    setSessions(s.data);
-    setPendingCerts(pc.data);
-    setMantras(mn.data);
+    const arr = (x) => (Array.isArray(x.data) ? x.data : []);
+    setOfferings(arr(o));
+    setConsultations(arr(cn));
+    setAcharyas(arr(a));
+    setContent(arr(con));
+    setCertGroups(arr(cg));
+    setUsers(arr(u));
+    setWebinars(arr(w));
+    setSessions(arr(s));
+    setPendingCerts(arr(pc));
+    setMantras(arr(mn));
   };
   useEffect(() => { load(); }, []);
 

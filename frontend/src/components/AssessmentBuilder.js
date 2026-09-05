@@ -12,7 +12,7 @@ export default function AssessmentBuilder({ offeringId, canAuthorQuiz = true, en
 
   const load = async () => {
     const { data } = await api.get(`/quizzes?context=course&offering_id=${offeringId}`).catch(() => ({ data: [] }));
-    setQuiz(data[0] || null);
+    setQuiz((Array.isArray(data) ? data : [])[0] || null);
   };
   useEffect(() => { if (enabled) load(); }, [offeringId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 

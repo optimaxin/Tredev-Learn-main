@@ -15,9 +15,9 @@ export default function GradingPanel() {
   const load = async () => {
     const { data: quizzes } = await api.get("/quizzes").catch(() => ({ data: [] }));
     const perQuiz = await Promise.all(
-      quizzes.map((q) =>
+      (Array.isArray(quizzes) ? quizzes : []).map((q) =>
         api.get(`/quizzes/${q.id}/attempts?status=submitted`)
-          .then((r) => r.data.map((attempt) => ({ quiz: q, attempt })))
+          .then((r) => (Array.isArray(r.data) ? r.data : []).map((attempt) => ({ quiz: q, attempt })))
           .catch(() => [])
       )
     );

@@ -20,7 +20,7 @@ export default function JournalManager({ canAuthor = true }) {
 
   const load = async () => {
     const { data } = await api.get("/blogs").catch(() => ({ data: [] }));
-    setEntries(data);
+    setEntries(Array.isArray(data) ? data : []);
   };
   useEffect(() => { load(); }, []);
 

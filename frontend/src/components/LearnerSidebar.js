@@ -1,16 +1,15 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Award, BookOpen, HelpCircle, Radio } from "lucide-react";
+import api from "@/lib/api";
 
-/** Right sidebar for the Learner Dashboard — profile, overall progress, and quick stats. */
+/** Right sidebar for the Learner Dashboard — profile, performance, and quick stats. */
 export default function LearnerSidebar({ user, enrollments, certs, sessions, doubts }) {
-  const pctOf = (e) => {
-    const total = (e.offering?.modules || []).length;
-    const done = (e.completed_lessons || []).length;
-    return total ? Math.round((done / total) * 100) : (e.progress || 0);
-  };
-  const overallPct = enrollments.length
-    ? Math.round(enrollments.reduce((sum, e) => sum + pctOf(e), 0) / enrollments.length)
-    : 0;
+  const [performance, setPerformance] = useState(null);
+
+  useEffect(() => {
+    api.get("/learner/performance").then(({ data }) => setPerformance(data)).catch(() => {});
+  }, []);
+
   const openDoubts = doubts.filter((d) => !d.answer).length;
 
   const stats = [
@@ -30,13 +29,23 @@ export default function LearnerSidebar({ user, enrollments, certs, sessions, dou
         <div className="text-xs text-muted-foreground uppercase tracking-widest mt-1">Learner</div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-6">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Overall progress</div>
+      <div className="rounded-2xl border border-border bg-card p-6" data-testid="performance-card">
+        <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Performance</div>
         <div className="flex items-end justify-between mb-2">
-          <span className="text-3xl font-display font-bold">{overallPct}%</span>
+          <span className="text-3xl font-display font-bold">{performance?.performance_pct ?? 0}%</span>
         </div>
-        <div className="h-2 rounded-full bg-muted overflow-hidden">
-          <div className="h-full bg-gradient-hot transition-all duration-500" style={{ width: `${overallPct}%` }} />
+        <div className="h-2 rounded-full bg-muted overflow-hidden mb-4">
+          <div className="h-full bg-gradient-hot transition-all duration-500" style={{ width: `${performance?.performance_pct ?? 0}%` }} />
+        </div>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Attendance ({performance?.lessons_attended ?? 0}/{performance?.total_lessons ?? 0} lessons)</span>
+            <span className="font-semibold tabular">{performance?.attendance_pct ?? 0}%</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Assignments ({performance?.graded_assignments ?? 0} graded)</span>
+            <span className="font-semibold tabular">{performance?.quiz_avg_pct ?? "—"}{performance?.quiz_avg_pct != null ? "%" : ""}</span>
+          </div>
         </div>
       </div>
 

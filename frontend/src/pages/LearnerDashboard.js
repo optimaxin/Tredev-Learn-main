@@ -84,19 +84,20 @@ export default function LearnerDashboard() {
 
   const load = async () => {
     const [e, s, c, d, w, reg] = await Promise.all([
-      api.get("/enrollments/mine"),
+      api.get("/enrollments/mine").catch(()=>({data:[]})),
       api.get("/live-sessions/mine-learner").catch(()=>({data:[]})),
       api.get("/certificates/mine").catch(()=>({data:[]})),
       api.get("/doubts/mine").catch(()=>({data:[]})),
       api.get("/webinars").catch(()=>({data:[]})),
       api.get("/webinars/my-registrations").catch(()=>({data:[]})),
     ]);
-    setEnrollments(e.data);
-    setSessions(s.data);
-    setCerts(c.data);
-    setDoubts(d.data);
-    const regSet = new Set(reg.data);
-    setEvents(w.data.filter((x) => regSet.has(x.id)));
+    const arr = (x) => (Array.isArray(x.data) ? x.data : []);
+    setEnrollments(arr(e));
+    setSessions(arr(s));
+    setCerts(arr(c));
+    setDoubts(arr(d));
+    const regSet = new Set(arr(reg));
+    setEvents(arr(w).filter((x) => regSet.has(x.id)));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (user) load(); }, [user?.id]);

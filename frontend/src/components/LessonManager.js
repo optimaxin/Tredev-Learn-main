@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { uploadCourseMedia } from "@/lib/upload";
-import { uploadLectureVideo } from "@/lib/bunny";
+import { uploadLectureVideo, getPreviewUrl } from "@/lib/bunny";
 import { Trash2, Plus, UploadCloud, Save, CheckCircle2, FileText } from "lucide-react";
 
 export const newLesson = () => ({
@@ -18,23 +18,41 @@ export const newLesson = () => ({
  * Controlled lesson list editor (recorded video + written body).
  * Parent owns the `lessons` array and receives updates via `onChange`.
  */
-export function LessonEditor({ lessons, onChange, idPrefix = "lesson" }) {
+export function LessonEditor({ lessons, onChange, idPrefix = "lesson", offeringId }) {
   const [uploading, setUploading] = useState({}); // id -> percent
   const [uploadingNotes, setUploadingNotes] = useState({}); // id -> true while in flight
+  const [previewUrls, setPreviewUrls] = useState({}); // id -> signed embed url
 
   const patch = (idx, p) => onChange(lessons.map((l, i) => (i === idx ? { ...l, ...p } : l)));
   const add = () => onChange([...lessons, newLesson()]);
   const remove = (idx) => onChange(lessons.filter((_, i) => i !== idx));
+
+  // Bunny previews need a fresh signed token each time — fetch one for any
+  // bunny-hosted lesson that doesn't have one yet (newly uploaded, or loaded
+  // from a saved course on mount).
+  useEffect(() => {
+    let cancelled = false;
+    lessons.forEach((l) => {
+      if (l.video_provider === "bunny" && l.video_path && !previewUrls[l.id]) {
+        getPreviewUrl(l.video_path)
+          .then((url) => { if (!cancelled) setPreviewUrls((p) => ({ ...p, [l.id]: url })); })
+          .catch(() => {});
+      }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessons]);
 
   const onVideo = async (idx, file) => {
     if (!file) return;
     const id = lessons[idx].id;
     setUploading((u) => ({ ...u, [id]: 0 }));
     try {
-      const { video_id, playback_url } = await uploadLectureVideo(file, lessons[idx].title, (pct) =>
+      const { video_id, playback_url } = await uploadLectureVideo(file, lessons[idx].title, offeringId, (pct) =>
         setUploading((u) => ({ ...u, [id]: pct }))
       );
       patch(idx, { video_url: playback_url, video_path: video_id, video_provider: "bunny" });
+      setPreviewUrls((p) => { const n = { ...p }; delete n[id]; return n; }); // force a fresh token for the new video
       toast.success("Video uploaded.");
     } catch (e) {
       toast.error(formatApiError(e) || e.message || "Upload failed");
@@ -106,9 +124,13 @@ export function LessonEditor({ lessons, onChange, idPrefix = "lesson" }) {
           </div>
           {l.video_url && (
             l.video_provider === "bunny"
-              ? <iframe src={l.video_url} title={l.title || "Lecture video"} loading="lazy"
-                  className="w-full max-w-md aspect-video rounded-lg border border-border"
-                  allow="accelerometer; gyroscope; encrypted-media; picture-in-picture;" allowFullScreen />
+              ? (previewUrls[l.id]
+                  ? <iframe src={previewUrls[l.id]} title={l.title || "Lecture video"} loading="lazy"
+                      className="w-full max-w-md aspect-video rounded-lg border border-border"
+                      allow="accelerometer; gyroscope; encrypted-media; picture-in-picture;" allowFullScreen />
+                  : <div className="w-full max-w-md aspect-video rounded-lg border border-dashed border-border flex items-center justify-center text-xs text-muted-foreground">
+                      Loading preview…
+                    </div>)
               : <video src={l.video_url} controls className="w-full max-w-md rounded-lg border border-border" />
           )}
         </div>
@@ -150,7 +172,7 @@ export default function LessonManager({ offering, onSaved }) {
 
   return (
     <div className="space-y-4" data-testid={`lesson-manager-${offering.id}`}>
-      <LessonEditor lessons={lessons} onChange={setLessons} idPrefix={`lesson-${offering.id}`} />
+      <LessonEditor lessons={lessons} onChange={setLessons} idPrefix={`lesson-${offering.id}`} offeringId={offering.id} />
       <Button size="sm" onClick={save} disabled={saving} className="rounded-full bg-gradient-hot text-white border-0" data-testid={`lesson-save-${offering.id}`}>
         <Save className="w-4 h-4 mr-1" /> {saving ? "Saving…" : "Save lessons"}
       </Button>

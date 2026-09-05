@@ -13,8 +13,8 @@ export default function BlogDetail() {
   const [b, setB] = useState(null);
   const [related, setRelated] = useState([]);
   useEffect(() => {
-    api.get(`/blogs/${slug}`).then((r) => setB(r.data));
-    api.get(`/blogs`).then((r) => setRelated(r.data.filter((x) => x.slug !== slug).slice(0, 3)));
+    api.get(`/blogs/${slug}`).then((r) => setB(r.data)).catch(() => setB(null));
+    api.get(`/blogs`).then((r) => setRelated((Array.isArray(r.data) ? r.data : []).filter((x) => x.slug !== slug).slice(0, 3))).catch(() => setRelated([]));
   }, [slug]);
   if (!b) return <div className="py-24 text-center text-muted-foreground">Loading…</div>;
   return (

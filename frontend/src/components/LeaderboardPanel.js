@@ -20,13 +20,13 @@ export default function LeaderboardPanel() {
   const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
-    api.get("/quizzes").then(({ data }) => setQuizzes(data)).catch(() => {});
+    api.get("/quizzes").then(({ data }) => setQuizzes(Array.isArray(data) ? data : [])).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!quizId) { setRows([]); return; }
     api.get(`/quizzes/${quizId}/leaderboard`)
-      .then(({ data }) => setRows(data))
+      .then(({ data }) => setRows(Array.isArray(data) ? data : []))
       .catch((e) => { toast.error(formatApiError(e)); setRows([]); });
   }, [quizId]);
 
