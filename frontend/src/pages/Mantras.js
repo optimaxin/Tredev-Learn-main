@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import { Music } from "lucide-react";
 
 export default function Mantras() {
+  const { t } = useTranslation();
   const [mantras, setMantras] = useState([]);
   const [params, setParams] = useSearchParams();
   const deity = params.get("deity") || "all";
@@ -28,13 +30,13 @@ export default function Mantras() {
   return (
     <div className="site-container py-16">
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">
-        <Music className="w-3 h-3" /> MANTRAS · BY DEITY
+        <Music className="w-3 h-3" /> {t("mantras.badge")}
       </div>
       <h1 className="font-display text-5xl md:text-6xl font-bold tracking-tight">
-        Mantras for every <span className="text-gradient-cosmic">deity</span>
+        {t("mantras.headingPlain")} <span className="text-gradient-cosmic">{t("mantras.headingHighlight")}</span>
       </h1>
       <p className="mt-4 text-lg text-muted-foreground max-w-2xl">
-        Chant along — each mantra carries its Devanāgarī, transliteration, meaning, and recitation audio.
+        {t("mantras.subtext")}
       </p>
 
       {/* Deity filter — auto-built from what's available */}
@@ -42,7 +44,7 @@ export default function Mantras() {
         {["all", ...deities].map((d) => (
           <button key={d} onClick={() => setDeity(d)} data-testid={`mantra-deity-${d}`}
             className={`px-4 py-1.5 rounded-full text-xs uppercase tracking-widest border transition-colors ${deity === d ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"}`}>
-            {d === "all" ? "All deities" : d}
+            {d === "all" ? t("mantras.allDeities") : d}
           </button>
         ))}
       </div>
@@ -59,12 +61,12 @@ export default function Mantras() {
             {m.meaning && <p className="text-sm text-muted-foreground mt-3 leading-relaxed">{m.meaning}</p>}
             {m.audio_url
               ? <audio src={m.audio_url} controls className="mt-5 w-full" data-testid={`mantra-audio-${m.id}`} />
-              : <div className="mt-5 text-xs text-muted-foreground">Recitation audio coming soon.</div>}
+              : <div className="mt-5 text-xs text-muted-foreground">{t("mantras.audioComingSoon")}</div>}
           </div>
         ))}
         {filtered.length === 0 && (
           <div className="col-span-full py-20 text-center text-muted-foreground text-sm">
-            No mantras {deity !== "all" ? `for ${deity} ` : ""}yet.
+            {deity !== "all" ? t("mantras.noneForDeity", { deity }) : t("mantras.noneYet")}
           </div>
         )}
       </div>

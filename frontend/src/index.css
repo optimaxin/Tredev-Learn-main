@@ -284,6 +284,18 @@
 .dark .eyebrow {
   color: hsl(var(--accent));
 }
+/* Devanagari key/label variant of .eyebrow — the wide Latin letter-tracking and
+   uppercase transform above mangle conjunct glyphs (renders as gappy, broken-looking
+   text), so this drops both and leans on weight instead to still read as a "key". */
+.eyebrow-hi {
+  font-family: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif;
+  font-size: 0.85rem; letter-spacing: normal; text-transform: none;
+  font-weight: 700;
+  color: hsl(37 64% 32%);
+}
+.dark .eyebrow-hi {
+  color: hsl(var(--accent));
+}
 
 /* Elegant hover underline */
 .link-underline { position: relative; }
@@ -379,6 +391,25 @@
 
 /* Aspect ratio helpers */
 .aspect-portrait { aspect-ratio: 3/4; }
+
+/* ---------- Tarot draw — 3D flip reveal ---------- */
+.tarot-scene { perspective: 1400px; }
+.tarot-flip {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 650ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tarot-flip.is-flipped { transform: rotateY(180deg); }
+.tarot-flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.tarot-flip-face-front { transform: rotateY(180deg); }
+@media (prefers-reduced-motion: reduce) {
+  .tarot-flip { transition: none; }
+}
 
 /* ---------- Printable certificate ---------- */
 .cert-print-area { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

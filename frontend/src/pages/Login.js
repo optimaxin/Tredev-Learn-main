@@ -57,8 +57,10 @@ export default function Login() {
           <div>learner@tredevlearn.com / Learner@123</div>
           <div>acharya@tredevlearn.com / Acharya@123</div>
           <div>staff@tredevlearn.com / Staff@123</div>
+          <div>staff1@tredevlearn.com / Staff1@123</div>
           <div>admin@tredevlearn.com / Admin@123</div>
           <div>superadmin@tredevlearn.com / SuperAdmin@123</div>
+
         </div>
       </form>
     </div>

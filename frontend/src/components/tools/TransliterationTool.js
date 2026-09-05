@@ -1,99 +1,148 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Copy, X } from "lucide-react";
+import { ArrowLeftRight, Copy, X } from "lucide-react";
 import { toast } from "sonner";
-import { ROMAN_SCHEMES, toDevanagari, toRoman } from "@/lib/tools/transliteration";
+import { SCRIPT_OPTIONS, transliterate } from "@/lib/tools/transliteration";
 
-function copy(text) {
+function copy(text, t) {
   if (!text) return;
   navigator.clipboard?.writeText(text);
-  toast.success("Copied to clipboard");
+  toast.success(t("tools.translit.copied"));
 }
 
 export default function TransliterationTool() {
-  const [deva, setDeva] = useState("श्री गणेशाय नमः");
-  const [roman, setRoman] = useState("");
-  const [scheme, setScheme] = useState("iast");
+  const { t } = useTranslation();
+  const [leftScheme, setLeftScheme] = useState("devanagari");
+  const [rightScheme, setRightScheme] = useState("itrans");
+  const [leftText, setLeftText] = useState("श्री गणेशाय नमः");
+  const [rightText, setRightText] = useState(() => transliterate("श्री गणेशाय नमः", "devanagari", "itrans"));
 
-  useEffect(() => {
-    setRoman(toRoman(deva, scheme));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheme]);
+  const leftOption = SCRIPT_OPTIONS.find((s) => s.value === leftScheme);
+  const rightOption = SCRIPT_OPTIONS.find((s) => s.value === rightScheme);
 
-  const onDevaChange = (e) => {
-    const val = e.target.value;
-    setDeva(val);
-    setRoman(toRoman(val, scheme));
+  const onLeftSchemeChange = (val) => {
+    setLeftScheme(val);
+    setRightText(transliterate(leftText, val, rightScheme));
   };
 
-  const onRomanChange = (e) => {
+  const onRightSchemeChange = (val) => {
+    setRightScheme(val);
+    setRightText(transliterate(leftText, leftScheme, val));
+  };
+
+  const onLeftTextChange = (e) => {
     const val = e.target.value;
-    setRoman(val);
-    setDeva(toDevanagari(val, scheme));
+    setLeftText(val);
+    setRightText(transliterate(val, leftScheme, rightScheme));
+  };
+
+  const onRightTextChange = (e) => {
+    const val = e.target.value;
+    setRightText(val);
+    setLeftText(transliterate(val, rightScheme, leftScheme));
+  };
+
+  const swap = () => {
+    setLeftScheme(rightScheme);
+    setRightScheme(leftScheme);
+    setLeftText(rightText);
+    setRightText(leftText);
   };
 
   const clearAll = () => {
-    setDeva("");
-    setRoman("");
+    setLeftText("");
+    setRightText("");
   };
+
+  const boxStyle = (option) =>
+    option?.value === "devanagari" ? "font-devanagari text-2xl leading-relaxed" : "font-serif italic text-lg leading-relaxed";
 
   return (
     <div>
-      <div className="eyebrow mb-3">Transliteration · Devanagari ⇄ Roman</div>
-      <h3 className="font-serif text-3xl mb-2">A study tool, both directions.</h3>
+      <div className="eyebrow mb-3">{t("tools.translit.heading")}</div>
+      <h3 className="font-serif text-3xl mb-2">{t("tools.translit.title")}</h3>
       <p className="text-sm text-muted-foreground mb-6 max-w-2xl">
-        Type in either box — the other updates as you go. Choose a romanization scheme below.
+        {t("tools.translit.subtext")}
       </p>
 
-      <div className="flex items-center gap-4 mb-6">
-        <Label className="eyebrow">Roman scheme</Label>
-        <Select value={scheme} onValueChange={setScheme}>
-          <SelectTrigger className="h-9 w-48" data-testid="translit-scheme">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ROMAN_SCHEMES.map((s) => (
-              <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" size="sm" onClick={clearAll} className="rounded-full ml-auto" data-testid="translit-clear">
-          <X className="w-3 h-3 mr-1" /> Clear
+      <div className="flex justify-end mb-2">
+        <Button variant="outline" size="sm" onClick={clearAll} className="rounded-full" data-testid="translit-clear">
+          <X className="w-3 h-3 mr-1" /> {t("tools.translit.clear")}
         </Button>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid md:grid-cols-[1fr_auto_1fr] gap-6 items-start">
         <div className="rounded-lg border border-border bg-card/50 p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="eyebrow">Devanagari</span>
-            <Button variant="ghost" size="sm" onClick={() => copy(deva)} data-testid="translit-copy-deva">
-              <Copy className="w-3 h-3" />
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <Select value={leftScheme} onValueChange={onLeftSchemeChange}>
+              <SelectTrigger className="h-9 w-56" data-testid="translit-scheme-left">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCRIPT_OPTIONS.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" onClick={() => copy(leftText, t)} data-testid="translit-copy-left">
+              <Copy className="w-3 h-3 mr-1" /> {t("tools.translit.copy")}
             </Button>
           </div>
+          {leftOption && (
+            <p className="text-xs text-muted-foreground mb-2">
+              {leftOption.hint} <span className="italic">{t("tools.translit.example")}: "{leftOption.example}"</span>
+            </p>
+          )}
           <Textarea
-            value={deva}
-            onChange={onDevaChange}
-            className="min-h-[220px] font-devanagari text-2xl leading-relaxed"
-            data-testid="translit-devanagari-input"
-            placeholder="देवनागरी में टाइप करें…"
+            value={leftText}
+            onChange={onLeftTextChange}
+            className={`min-h-[220px] ${boxStyle(leftOption)}`}
+            data-testid="translit-box-left"
+            placeholder={t("tools.translit.typeHere")}
           />
         </div>
+
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={swap}
+          className="rounded-full mt-9 mx-auto md:mx-0"
+          data-testid="translit-swap"
+          aria-label={t("tools.translit.swapScripts")}
+        >
+          <ArrowLeftRight className="w-4 h-4" />
+        </Button>
+
         <div className="rounded-lg border border-border bg-card/50 p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="eyebrow">Romanized ({ROMAN_SCHEMES.find((s) => s.value === scheme)?.label})</span>
-            <Button variant="ghost" size="sm" onClick={() => copy(roman)} data-testid="translit-copy-roman">
-              <Copy className="w-3 h-3" />
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <Select value={rightScheme} onValueChange={onRightSchemeChange}>
+              <SelectTrigger className="h-9 w-56" data-testid="translit-scheme-right">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCRIPT_OPTIONS.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" onClick={() => copy(rightText, t)} data-testid="translit-copy-right">
+              <Copy className="w-3 h-3 mr-1" /> {t("tools.translit.copy")}
             </Button>
           </div>
+          {rightOption && (
+            <p className="text-xs text-muted-foreground mb-2">
+              {rightOption.hint} <span className="italic">{t("tools.translit.example")}: "{rightOption.example}"</span>
+            </p>
+          )}
           <Textarea
-            value={roman}
-            onChange={onRomanChange}
-            className="min-h-[220px] font-serif italic text-lg leading-relaxed"
-            data-testid="translit-roman-input"
-            placeholder="Type romanized Sanskrit…"
+            value={rightText}
+            onChange={onRightTextChange}
+            className={`min-h-[220px] ${boxStyle(rightOption)}`}
+            data-testid="translit-box-right"
+            placeholder={t("tools.translit.typeHere")}
           />
         </div>
       </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +10,7 @@ import { toast } from "sonner";
 import { ClipboardList } from "lucide-react";
 
 export default function QuizAttempt() {
+  const { t } = useTranslation();
   const { quizId } = useParams();
   const [quiz, setQuiz] = useState(null);
   const [answers, setAnswers] = useState([]);
@@ -46,16 +48,16 @@ export default function QuizAttempt() {
         quiz_id: quizId, answers, started_at: startedAt.toISOString(), time_taken_seconds,
       });
       setResult(data);
-      toast.success("Attempt submitted.");
+      toast.success(t("quizAttempt.submitted"));
     } catch (e) { toast.error(formatApiError(e)); }
     setSubmitting(false);
   };
 
-  if (!quiz) return <div className="p-20 text-center text-muted-foreground">Loading…</div>;
+  if (!quiz) return <div className="p-20 text-center text-muted-foreground">{t("common.loading")}</div>;
 
   return (
     <div className="site-container py-16 max-w-3xl">
-      <div className="eyebrow mb-3">Assessment</div>
+      <div className="eyebrow mb-3">{t("quizAttempt.eyebrow")}</div>
       <h1 className="text-4xl font-serif tracking-tight mb-10" data-testid="quiz-title">{quiz.title}</h1>
 
       {result ? (
@@ -63,10 +65,10 @@ export default function QuizAttempt() {
           <ClipboardList className="w-6 h-6 text-primary shrink-0" />
           <div>
             <div className="font-display font-semibold text-lg">
-              {result.status === "graded" ? `Score: ${result.score}/${result.total_score}` : "Submitted — pending staff review"}
+              {result.status === "graded" ? t("quizAttempt.score", { score: result.score, total: result.total_score }) : t("quizAttempt.pendingReview")}
             </div>
             {result.status !== "graded" && (
-              <p className="mt-1 text-sm text-muted-foreground">Your descriptive answers will be graded by the academic team.</p>
+              <p className="mt-1 text-sm text-muted-foreground">{t("quizAttempt.gradedNote")}</p>
             )}
           </div>
         </div>
@@ -80,7 +82,7 @@ export default function QuizAttempt() {
               )}
               {q.type === "paragraph" ? (
                 <Textarea value={answers[qi] || ""} onChange={(e) => setAnswer(qi, e.target.value)}
-                  placeholder="Your answer" data-testid={`quiz-answer-${qi}`} />
+                  placeholder={t("quizAttempt.yourAnswer")} data-testid={`quiz-answer-${qi}`} />
               ) : q.multiple ? (
                 <div className="space-y-2">
                   {(q.options || []).map((opt, oi) => (
@@ -104,7 +106,7 @@ export default function QuizAttempt() {
             </div>
           ))}
           <Button size="lg" onClick={submit} disabled={submitting} className="rounded-full px-8 h-12" data-testid="quiz-submit">
-            {submitting ? "Submitting…" : "Submit"}
+            {submitting ? t("quizAttempt.submitting") : t("quizAttempt.submit")}
           </Button>
         </div>
       )}

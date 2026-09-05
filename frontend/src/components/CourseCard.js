@@ -1,9 +1,13 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Clock, ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { localized } from "@/lib/utils";
 
 export default function CourseCard({ course: o }) {
+  const { i18n } = useTranslation();
+  const lang = i18n.resolvedLanguage || i18n.language || "en";
   return (
     <Link to={`/courses/${o.id}`} data-testid={`course-card-${o.id}`}
       className="group flex flex-col rounded-2xl overflow-hidden border border-border bg-card card-elevated">
@@ -29,8 +33,8 @@ export default function CourseCard({ course: o }) {
       {/* Body — flex-1 so footers align across the row */}
       <div className="flex flex-col flex-1 p-6">
         <div className="eyebrow text-accent">{o.subject}</div>
-        <h3 className="font-display text-xl font-semibold leading-snug mt-2 text-primary line-clamp-2">{o.title}</h3>
-        {o.subtitle && <p className="text-sm text-muted-foreground mt-2 line-clamp-2 leading-relaxed">{o.subtitle}</p>}
+        <h3 className="font-display text-xl font-semibold leading-snug mt-2 text-primary line-clamp-2">{localized(o, "title", lang)}</h3>
+        {o.subtitle && <p className="text-sm text-muted-foreground mt-2 line-clamp-2 leading-relaxed">{localized(o, "subtitle", lang)}</p>}
         <div className="mt-auto pt-5">
           <div className="flex items-center justify-between border-t border-border pt-4">
             <div className="tabular">

@@ -12,11 +12,16 @@ import os
 import re
 import csv
 import io
+import time
+import hashlib
 import logging
 import secrets
 import random
+import asyncio
 import requests
 import panchang
+import chat
+from translate import auto_translate
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Any, Dict
 
@@ -37,6 +42,12 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 COURSE_MEDIA_BUCKET = os.environ.get("COURSE_MEDIA_BUCKET", "course-media")
+CHAT_MEDIA_BUCKET = os.environ.get("CHAT_MEDIA_BUCKET", "chat-media")
+
+# Bunny Stream (lecture video hosting) — a per-video TUS upload signature is handed
+# to the browser so the real API key never leaves the server.
+BUNNY_LIBRARY_ID = os.environ.get("BUNNY_LIBRARY_ID", "")
+BUNNY_STREAM_API_KEY = os.environ.get("BUNNY_STREAM_API_KEY", "")
 
 
 def ObjectId(x):
@@ -46,6 +57,7 @@ def ObjectId(x):
 
 app = FastAPI(title="Tredev Learn API")
 api_router = APIRouter(prefix="/api")
+api_router.include_router(chat.router)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -259,6 +271,7 @@ class FeatureToggleIn(BaseModel):
 
 class DoubtIn(BaseModel):
     offering_id: Optional[str] = ""  # blank = general doubt raised via the chat widget
+    lesson_id: Optional[str] = ""  # blank = general course doubt, not tied to one lecture
     question: str
 
 class DoubtAnswerIn(BaseModel):
@@ -332,13 +345,16 @@ class SignUploadIn(BaseModel):
     filename: str
     content_type: Optional[str] = "application/octet-stream"
 
+class BunnyVideoSignIn(BaseModel):
+    title: Optional[str] = ""
+
 class ApprovalDecisionIn(BaseModel):
     approved: bool
     notes: Optional[str] = ""
 
 class CapabilityGrantIn(BaseModel):
     staff_id: str
-    capability: str  # course_builder, quiz_author, grader, doubts, consultations, cohorts
+    capability: str  # course_builder, quiz_author, assessment_author, session_author, journal_author, grader, doubts, consultations
     scope: List[str] = []  # offering ids, or ["*"] for all
 
 class FestivalIn(BaseModel):
@@ -528,7 +544,10 @@ async def get_offering(offering_id: str):
 @api_router.post("/offerings")
 async def create_offering(data: OfferingIn,
                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
-                          _feat: bool = Depends(require_feature("offerings"))):
+                          _feat: bool = Depends(require_feature("offerings")),
+                          _feat2: bool = Depends(require_feature("build"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "course_builder"):
+        raise HTTPException(403, "Course building has not been granted to you by admin — ask an admin to grant the 'course_builder' capability.")
     if not (data.acharya_id or "").strip():
         raise HTTPException(400, "Assign an Ācharya — every course must be routed to one for sign-off.")
     doc = data.model_dump()
@@ -536,6 +555,11 @@ async def create_offering(data: OfferingIn,
     doc["created_by"] = actor["id"]
     doc["approved_by_acharya"] = False
     doc["approval_notes"] = ""
+    doc["title_hi"], doc["subtitle_hi"], doc["description_hi"] = await asyncio.gather(
+        asyncio.to_thread(auto_translate, data.title),
+        asyncio.to_thread(auto_translate, data.subtitle),
+        asyncio.to_thread(auto_translate, data.description),
+    )
     result = await db.offerings.insert_one(doc)
     await write_audit(actor, "offering.create", str(result.inserted_id), {"title": data.title})
     doc["_id"] = result.inserted_id
@@ -546,7 +570,14 @@ async def create_offering(data: OfferingIn,
 async def update_offering(offering_id: str, data: dict,
                            actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                            _feat: bool = Depends(require_feature("offerings"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "offerings"):
+        raise HTTPException(403, "Offerings has not been granted to you by admin — ask an admin to grant the 'offerings' capability.")
     data.pop("id", None)
+    hi_fields = {"title": "title_hi", "subtitle": "subtitle_hi", "description": "description_hi"}
+    changed = [en for en in hi_fields if en in data]
+    translated = await asyncio.gather(*(asyncio.to_thread(auto_translate, data[en]) for en in changed))
+    for en, hi_text in zip(changed, translated):
+        data[hi_fields[en]] = hi_text
     await db.offerings.update_one({"_id": ObjectId(offering_id)}, {"$set": data})
     await write_audit(actor, "offering.update", offering_id, data)
     o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
@@ -714,45 +745,16 @@ async def get_sadhana(offering_id: str, user: dict = Depends(get_current_user)):
 
 
 # ==================== FREE CALCULATORS ====================
-NAKSHATRAS = ["Ashwini","Bharani","Krittika","Rohini","Mrigashira","Ardra","Punarvasu","Pushya",
-              "Ashlesha","Magha","Purva Phalguni","Uttara Phalguni","Hasta","Chitra","Swati","Vishakha",
-              "Anuradha","Jyeshtha","Mula","Purva Ashadha","Uttara Ashadha","Shravana","Dhanishta",
-              "Shatabhisha","Purva Bhadrapada","Uttara Bhadrapada","Revati"]
-
-TITHIS = ["Pratipada","Dwitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
-          "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Purnima/Amavasya"]
-
-YOGAS = ["Vishkambha","Priti","Ayushman","Saubhagya","Shobhana","Atiganda","Sukarma","Dhriti",
-         "Shula","Ganda","Vriddhi","Dhruva","Vyaghata","Harshana","Vajra","Siddhi","Vyatipata",
-         "Variyana","Parigha","Shiva","Siddha","Sadhya","Shubha","Shukla","Brahma","Indra","Vaidhriti"]
-
-KARANAS = ["Bava","Balava","Kaulava","Taitila","Gara","Vanija","Vishti","Shakuni","Chatushpada","Naga","Kimstughna"]
-
 RASHIS = ["Mesha","Vrishabha","Mithuna","Karka","Simha","Kanya","Tula","Vrishchika","Dhanu","Makara","Kumbha","Meena"]
 
 PLANETS = ["Sun","Moon","Mars","Mercury","Jupiter","Venus","Saturn","Rahu","Ketu"]
 
 
 @api_router.get("/calculators/panchang")
-async def calc_panchang(d: Optional[str] = None):
-    """Study-object panchang: no predictions, just computed elements."""
+async def calc_panchang(d: Optional[str] = None, lat: float = 28.6139, lon: float = 77.209):
+    """Panchang computed via Swiss Ephemeris (Lahiri ayanamsa), evaluated at local sunrise."""
     target = date.fromisoformat(d) if d else date.today()
-    seed = target.toordinal()
-    r = random.Random(seed)
-    return {
-        "date": target.isoformat(),
-        "tithi": TITHIS[seed % len(TITHIS)],
-        "paksha": "Shukla" if (seed % 30) < 15 else "Krishna",
-        "nakshatra": NAKSHATRAS[seed % len(NAKSHATRAS)],
-        "yoga": YOGAS[seed % len(YOGAS)],
-        "karana": KARANAS[seed % len(KARANAS)],
-        "vara": ["Ravivar","Somavar","Mangalvar","Budhavar","Guruvar","Shukravar","Shanivar"][target.weekday()],
-        "sunrise": "06:12",
-        "sunset": "18:34",
-        "moonrise": f"{(seed % 24):02d}:{(seed % 60):02d}",
-        "rahu_kalam": "07:30 – 09:00",
-        "note": "This is a study object. Learn to read a Panchang; the tradition does not predict — it observes."
-    }
+    return panchang.daily_panchang(target, lat, lon)
 
 
 @api_router.post("/calculators/numerology")
@@ -885,6 +887,8 @@ async def my_consultations_as_learner(user: dict = Depends(get_current_user)):
 async def update_consultation(cid: str, data: dict,
                                user: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                                _feat: bool = Depends(require_feature("consultations"))):
+    if user["role"] == "academic_staff" and not await has_capability(user["id"], "consultations"):
+        raise HTTPException(403, "Consultations has not been granted to you by admin — ask an admin to grant the 'consultations' capability.")
     await db.consultations.update_one({"_id": ObjectId(cid)}, {"$set": data})
     await write_audit(user, "consultation.update", cid, data)
     return {"ok": True}
@@ -1207,7 +1211,7 @@ async def quiz_leaderboard(quiz_id: str,
 @api_router.post("/doubts")
 async def ask_doubt(data: DoubtIn, user: dict = Depends(get_current_user)):
     doc = {
-        "offering_id": data.offering_id, "question": data.question,
+        "offering_id": data.offering_id, "lesson_id": data.lesson_id, "question": data.question,
         "asked_by": user["id"], "asked_by_name": user.get("name", ""),
         "answer": "", "answered_by": "", "status": "open",
         "created_at": now_utc().isoformat(),
@@ -1236,10 +1240,11 @@ async def my_doubts(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/doubts")
-async def list_doubts(offering_id: Optional[str] = None, status: Optional[str] = None):
+async def list_doubts(offering_id: Optional[str] = None, lesson_id: Optional[str] = None, status: Optional[str] = None):
     await purge_old_threads()
     q = {}
     if offering_id: q["offering_id"] = offering_id
+    if lesson_id: q["lesson_id"] = lesson_id
     if status: q["status"] = status
     items = await db.doubts.find(q).sort("created_at", -1).to_list(500)
     result = []
@@ -1255,6 +1260,8 @@ async def list_doubts(offering_id: Optional[str] = None, status: Optional[str] =
 async def answer_doubt(did: str, data: DoubtAnswerIn,
                         user: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                         _feat: bool = Depends(require_feature("doubts"))):
+    if user["role"] == "academic_staff" and not await has_capability(user["id"], "doubts"):
+        raise HTTPException(403, "Doubts has not been granted to you by admin — ask an admin to grant the 'doubts' capability.")
     await db.doubts.update_one({"_id": ObjectId(did)},
         {"$set": {"answer": data.answer, "answered_by": user["id"],
                   "answered_by_name": user.get("name", ""),
@@ -1375,6 +1382,8 @@ async def send_query_message(ticket_id: str, data: QueryMessageIn, user: dict = 
     role = user.get("role")
     now = now_utc().isoformat()
     if role in QUERY_STAFF_ROLES and t["user_id"] != user["id"]:
+        if role == "academic_staff" and not await has_capability(user["id"], "queries"):
+            raise HTTPException(403, "Queries has not been granted to you by admin — ask an admin to grant the 'queries' capability.")
         sender_role = "STAFF"
         if not t.get("assigned_staff_id"):
             # First staff reply claims the ticket — exclusive to this staff member.
@@ -1532,6 +1541,8 @@ async def join_session(sid: str, user: dict = Depends(get_current_user)):
 async def issue_certificate(payload: dict,
                              actor: dict = Depends(require_role("admin", "super_admin", "academic_staff")),
                              _feat: bool = Depends(require_feature("certs"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "certs"):
+        raise HTTPException(403, "Certificates has not been granted to you by admin — ask an admin to grant the 'certs' capability.")
     user_id = payload["user_id"]
     offering_id = payload["offering_id"]
     u = await db.users.find_one({"_id": ObjectId(user_id)})
@@ -1672,6 +1683,8 @@ async def certificate_requests(actor: dict = Depends(require_role("academic_staf
 async def approve_certificate_request(code: str,
                                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                                       _feat: bool = Depends(require_feature("certs"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "certs"):
+        raise HTTPException(403, "Certificates has not been granted to you by admin — ask an admin to grant the 'certs' capability.")
     c = await db.certificates.find_one({"code": code})
     if not c:
         raise HTTPException(404, "Certificate not found")
@@ -1802,7 +1815,10 @@ async def list_festivals():
 
 @api_router.post("/festivals")
 async def create_festival(data: FestivalIn,
-                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                           _feat: bool = Depends(require_feature("calendar"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "calendar"):
+        raise HTTPException(403, "Festival calendar has not been granted to you by admin — ask an admin to grant the 'calendar' capability.")
     doc = data.model_dump()
     r = await db.festivals.insert_one(doc)
     doc["_id"] = r.inserted_id
@@ -1812,7 +1828,10 @@ async def create_festival(data: FestivalIn,
 
 @api_router.patch("/festivals/{festival_id}")
 async def update_festival(festival_id: str, data: dict,
-                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                           _feat: bool = Depends(require_feature("calendar"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "calendar"):
+        raise HTTPException(403, "Festival calendar has not been granted to you by admin — ask an admin to grant the 'calendar' capability.")
     data.pop("id", None); data.pop("_id", None)
     if data:
         await db.festivals.update_one({"_id": ObjectId(festival_id)}, {"$set": data})
@@ -1825,7 +1844,10 @@ async def update_festival(festival_id: str, data: dict,
 
 @api_router.delete("/festivals/{festival_id}")
 async def delete_festival(festival_id: str,
-                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                           _feat: bool = Depends(require_feature("calendar"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "calendar"):
+        raise HTTPException(403, "Festival calendar has not been granted to you by admin — ask an admin to grant the 'calendar' capability.")
     await db.festivals.delete_one({"_id": ObjectId(festival_id)})
     await write_audit(actor, "festival.delete", festival_id, {})
     return {"ok": True}
@@ -1833,9 +1855,12 @@ async def delete_festival(festival_id: str,
 
 @api_router.post("/festivals/import-csv")
 async def import_festivals_csv(data: FestivalCsvImportIn,
-                                actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                                actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                                _feat: bool = Depends(require_feature("calendar"))):
     """CSV columns: name, date (YYYY-MM-DD), significance, deity, related_offering_subject.
     'replace' mode clears the calendar first; 'append' upserts by (name, date)."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "calendar"):
+        raise HTTPException(403, "Festival calendar has not been granted to you by admin — ask an admin to grant the 'calendar' capability.")
     reader = csv.DictReader(io.StringIO(data.csv_text))
     rows = []
     for row in reader:
@@ -1882,6 +1907,8 @@ async def list_mantras(deity: Optional[str] = None):
 async def create_mantra(data: MantraIn,
                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                         _feat: bool = Depends(require_feature("mantras"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mantras"):
+        raise HTTPException(403, "Mantras has not been granted to you by admin — ask an admin to grant the 'mantras' capability.")
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
@@ -1893,7 +1920,10 @@ async def create_mantra(data: MantraIn,
 
 @api_router.patch("/mantras/{mid}")
 async def update_mantra(mid: str, data: dict,
-                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("mantras"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mantras"):
+        raise HTTPException(403, "Mantras has not been granted to you by admin — ask an admin to grant the 'mantras' capability.")
     data.pop("id", None); data.pop("_id", None)
     if data:
         await db.mantras.update_one({"_id": ObjectId(mid)}, {"$set": data})
@@ -1906,6 +1936,8 @@ async def update_mantra(mid: str, data: dict,
 async def delete_mantra(mid: str,
                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                         _feat: bool = Depends(require_feature("mantras"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mantras"):
+        raise HTTPException(403, "Mantras has not been granted to you by admin — ask an admin to grant the 'mantras' capability.")
     await db.mantras.delete_one({"_id": ObjectId(mid)})
     await write_audit(actor, "mantra.delete", mid, {})
     return {"ok": True}
@@ -1932,6 +1964,11 @@ async def create_blog(data: BlogIn,
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
+    doc["title_hi"], doc["excerpt_hi"], doc["body_hi"] = await asyncio.gather(
+        asyncio.to_thread(auto_translate, data.title),
+        asyncio.to_thread(auto_translate, data.excerpt),
+        asyncio.to_thread(auto_translate, data.body),
+    )
     r = await db.blogs.insert_one(doc)
     doc["_id"] = r.inserted_id
     await write_audit(actor, "blog.create", str(r.inserted_id), {"title": data.title})
@@ -1945,6 +1982,11 @@ async def update_blog(blog_id: str, data: dict,
     if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "journal_author"):
         raise HTTPException(403, "Journal authoring has not been granted to you by admin — ask an admin to grant the 'journal_author' capability.")
     data.pop("id", None); data.pop("_id", None)
+    hi_fields = {"title": "title_hi", "excerpt": "excerpt_hi", "body": "body_hi"}
+    changed = [en for en in hi_fields if en in data]
+    translated = await asyncio.gather(*(asyncio.to_thread(auto_translate, data[en]) for en in changed))
+    for en, hi_text in zip(changed, translated):
+        data[hi_fields[en]] = hi_text
     if data:
         await db.blogs.update_one({"_id": ObjectId(blog_id)}, {"$set": data})
     await write_audit(actor, "blog.update", blog_id, data)
@@ -2003,7 +2045,10 @@ async def list_mentors():
 
 @api_router.post("/mentors")
 async def create_mentor(data: MentorIn,
-                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                         _feat: bool = Depends(require_feature("mentors"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mentors"):
+        raise HTTPException(403, "Mentors has not been granted to you by admin — ask an admin to grant the 'mentors' capability.")
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
@@ -2015,7 +2060,10 @@ async def create_mentor(data: MentorIn,
 
 @api_router.patch("/mentors/{mentor_id}")
 async def update_mentor(mentor_id: str, data: dict,
-                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                         _feat: bool = Depends(require_feature("mentors"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mentors"):
+        raise HTTPException(403, "Mentors has not been granted to you by admin — ask an admin to grant the 'mentors' capability.")
     data.pop("id", None); data.pop("_id", None)
     if data:
         await db.mentors.update_one({"_id": ObjectId(mentor_id)}, {"$set": data})
@@ -2028,7 +2076,10 @@ async def update_mentor(mentor_id: str, data: dict,
 
 @api_router.delete("/mentors/{mentor_id}")
 async def delete_mentor(mentor_id: str,
-                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                         actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                         _feat: bool = Depends(require_feature("mentors"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mentors"):
+        raise HTTPException(403, "Mentors has not been granted to you by admin — ask an admin to grant the 'mentors' capability.")
     await db.mentors.delete_one({"_id": ObjectId(mentor_id)})
     await write_audit(actor, "mentor.delete", mentor_id, {})
     return {"ok": True}
@@ -2168,7 +2219,8 @@ async def list_acharya_content(user: dict = Depends(get_current_user)):
 
 @api_router.post("/acharya/content/{cid}/review")
 async def review_acharya_content(cid: str, data: AcharyaContentReviewIn,
-                                  actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+                                  actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                                  _feat: bool = Depends(require_feature("content-review"))):
     await db.acharya_content.update_one({"_id": ObjectId(cid)},
         {"$set": {"status": "approved" if data.approved else "changes_requested",
                   "review_notes": data.notes,
@@ -2307,6 +2359,8 @@ async def learner_live_sessions(user: dict = Depends(get_current_user)):
 async def create_webinar(data: WebinarCreateIn,
                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                           _feat: bool = Depends(require_feature("webinars"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "webinars"):
+        raise HTTPException(403, "Webinars has not been granted to you by admin — ask an admin to grant the 'webinars' capability.")
     doc = data.model_dump()
     doc["created_at"] = now_utc().isoformat()
     doc["created_by"] = actor["id"]
@@ -2320,6 +2374,8 @@ async def create_webinar(data: WebinarCreateIn,
 async def update_webinar(wid: str, data: dict,
                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                           _feat: bool = Depends(require_feature("webinars"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "webinars"):
+        raise HTTPException(403, "Webinars has not been granted to you by admin — ask an admin to grant the 'webinars' capability.")
     data.pop("id", None); data.pop("_id", None)
     if data:
         await db.webinars.update_one({"_id": ObjectId(wid)}, {"$set": data})
@@ -2332,6 +2388,8 @@ async def update_webinar(wid: str, data: dict,
 async def delete_webinar(wid: str,
                           actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
                           _feat: bool = Depends(require_feature("webinars"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "webinars"):
+        raise HTTPException(403, "Webinars has not been granted to you by admin — ask an admin to grant the 'webinars' capability.")
     await db.webinars.delete_one({"_id": ObjectId(wid)})
     await write_audit(actor, "webinar.delete", wid, {})
     return {"ok": True}
@@ -2416,6 +2474,34 @@ def ensure_storage_bucket():
         logger.warning(f"Bucket ensure failed: {e}")
 
 
+def ensure_chat_media_bucket():
+    """Best-effort: create the public chat-media bucket if storage is configured.
+
+    file_size_limit / allowed_mime_types are enforced by Supabase itself on
+    every upload — this is the real server-side guard, not just a UI hint.
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.info("Storage not configured — skipping chat-media bucket ensure.")
+        return
+    try:
+        resp = requests.post(f"{SUPABASE_URL}/storage/v1/bucket", json={
+            "id": CHAT_MEDIA_BUCKET, "name": CHAT_MEDIA_BUCKET, "public": True,
+            "file_size_limit": "5MB",
+            "allowed_mime_types": ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        }, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+        if resp.status_code < 300:
+            logger.info(f"Storage bucket '{CHAT_MEDIA_BUCKET}' created.")
+        elif "already exists" in resp.text.lower() or resp.status_code == 409:
+            logger.info(f"Storage bucket '{CHAT_MEDIA_BUCKET}' ready.")
+        else:
+            logger.warning(f"Chat-media bucket ensure returned {resp.status_code}: {resp.text[:160]}")
+    except Exception as e:
+        logger.warning(f"Chat-media bucket ensure failed: {e}")
+
+
 @api_router.post("/storage/sign-upload")
 async def sign_upload(data: SignUploadIn,
                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
@@ -2439,6 +2525,39 @@ async def sign_upload(data: SignUploadIn,
     public_url = f"{SUPABASE_URL}/storage/v1/object/public/{COURSE_MEDIA_BUCKET}/{path}"
     return {"upload_url": upload_url, "public_url": public_url, "path": path,
             "content_type": data.content_type}
+
+
+@api_router.post("/lectures/video/sign")
+async def sign_lecture_video(data: BunnyVideoSignIn,
+                              actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Create a Bunny Stream video and hand back a short-lived TUS upload signature —
+    same edit permission as the rest of a course's Lessons tab. The Bunny API key
+    itself never reaches the browser."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "offerings"):
+        raise HTTPException(403, "Offerings has not been granted to you by admin — ask an admin to grant the 'offerings' capability.")
+    if not BUNNY_LIBRARY_ID or not BUNNY_STREAM_API_KEY:
+        raise HTTPException(503, "Video hosting is not configured (set BUNNY_LIBRARY_ID and BUNNY_STREAM_API_KEY in backend/.env).")
+    try:
+        resp = requests.post(
+            f"https://video.bunnycdn.com/library/{BUNNY_LIBRARY_ID}/videos",
+            headers={"AccessKey": BUNNY_STREAM_API_KEY, "Content-Type": "application/json"},
+            json={"title": data.title or "Untitled lecture"}, timeout=15,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Bunny request failed: {e}")
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"Could not create video ({resp.status_code}): {resp.text[:200]}")
+    video_id = resp.json().get("guid")
+    expire = int(time.time()) + 3600
+    signature = hashlib.sha256(f"{BUNNY_LIBRARY_ID}{BUNNY_STREAM_API_KEY}{expire}{video_id}".encode()).hexdigest()
+    return {
+        "endpoint": "https://video.bunnycdn.com/tusupload",
+        "video_id": video_id,
+        "library_id": BUNNY_LIBRARY_ID,
+        "signature": signature,
+        "expire": expire,
+        "playback_url": f"https://iframe.mediadelivery.net/embed/{BUNNY_LIBRARY_ID}/{video_id}",
+    }
 
 
 # ==================== ROOT ====================
@@ -3056,6 +3175,7 @@ async def on_startup():
         await dbmod.run_sql(schema_path.read_text())
         logger.info("Schema ensured")
     ensure_storage_bucket()
+    ensure_chat_media_bucket()
     try:
         firebase_auth.init_firebase()
     except Exception as e:
@@ -3065,6 +3185,11 @@ async def on_startup():
         logger.info("Startup seed complete")
     except Exception as e:
         logger.exception(f"Seed failed: {e}")
+    try:
+        await chat.ensure_default_channels()
+    except Exception as e:
+        logger.exception(f"Chat channel seed failed: {e}")
+    asyncio.create_task(chat.cleanup_loop())
 
 
 @app.on_event("shutdown")

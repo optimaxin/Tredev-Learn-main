@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
 CREATE TABLE IF NOT EXISTS doubts (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     offering_id      uuid,
+    lesson_id        text DEFAULT '',
     question         text,
     asked_by         uuid,
     asked_by_name    text DEFAULT '',
@@ -450,3 +451,63 @@ INSERT INTO feature_toggles (key, label) VALUES
     ('queries', 'Queries')
 ON CONFLICT (key) DO NOTHING;
 ALTER TABLE consultations ADD COLUMN IF NOT EXISTS replied_at text;
+
+-- ==================== COMMUNITY CHAT ====================
+CREATE TABLE IF NOT EXISTS chat_channels (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         text NOT NULL,
+    type         text NOT NULL DEFAULT 'PUBLIC',
+    course_id    uuid,
+    is_read_only boolean DEFAULT false,
+    created_at   text,
+    created_by   uuid
+);
+CREATE INDEX IF NOT EXISTS idx_chat_channels_course ON chat_channels(course_id);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    channel_id     uuid NOT NULL,
+    user_id        uuid,
+    user_name      text DEFAULT '',
+    user_role      text DEFAULT '',
+    content        text DEFAULT '',
+    attachment_url text DEFAULT '',
+    is_deleted     boolean DEFAULT false,
+    created_at     text
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id, created_at);
+
+INSERT INTO feature_toggles (key, label) VALUES ('community_chat', 'Community Chat')
+ON CONFLICT (key) DO NOTHING;
+
+-- Invite-only channels: joinable only via a secret link, never listed unless joined.
+ALTER TABLE chat_channels ADD COLUMN IF NOT EXISTS join_token text;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_channels_join_token ON chat_channels(join_token) WHERE join_token IS NOT NULL;
+
+-- Mentors showcase and Festival Calendar staff-panel tabs were previously never
+-- individually toggleable from the admin panel — give them their own switch too.
+INSERT INTO feature_toggles (key, label) VALUES
+    ('mentors', 'Mentors'),
+    ('calendar', 'Festival Calendar')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS chat_channel_members (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    channel_id uuid NOT NULL,
+    user_id    uuid NOT NULL,
+    joined_at  text,
+    UNIQUE (channel_id, user_id)
+);
+
+-- Scope a doubt to one lesson (staff Lessons tab "Questions on this lecture");
+-- blank = a general course doubt, unchanged from before this column existed.
+ALTER TABLE doubts ADD COLUMN IF NOT EXISTS lesson_id text DEFAULT '';
+
+-- ==================== HINDI AUTO-TRANSLATION ====================
+ALTER TABLE blogs      ADD COLUMN IF NOT EXISTS title_hi       text;
+ALTER TABLE blogs      ADD COLUMN IF NOT EXISTS excerpt_hi     text;
+ALTER TABLE blogs      ADD COLUMN IF NOT EXISTS body_hi        text;
+ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS title_hi       text;
+ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS subtitle_hi    text;
+ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS description_hi text;
+CREATE INDEX IF NOT EXISTS idx_chat_channel_members_user ON chat_channel_members(user_id);

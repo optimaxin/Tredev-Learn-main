@@ -21,7 +21,8 @@ export default function CertificateVerify() {
     } catch { setResult({ valid: false, message: "Error verifying" }); }
     setBusy(false);
   };
-  React.useEffect(() => { if (initialCode) verify(); /* eslint-disable-next-line */ }, [initialCode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (initialCode) verify(); }, [initialCode]);
 
   return (
     <div className="max-w-3xl mx-auto py-24 px-6">

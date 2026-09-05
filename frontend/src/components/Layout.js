@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { Button } from "@/components/ui/button";
@@ -9,17 +10,19 @@ import {
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import FloatingChat from "@/components/FloatingChat";
+import LanguageToggle from "@/components/LanguageToggle";
 import { HOME } from "@/constants/testIds";
 
 const NAV = [
-  { to: "/courses", label: "Courses", testid: HOME.navCourses },
-  { to: "/events", label: "Events", testid: "nav-events" },
-  { to: "/calendar", label: "Calendar", testid: "nav-calendar" },
-  { to: "/mentors", label: "Mentors", testid: "nav-mentors" },
-  { to: "/calculators", label: "Free Tools", testid: HOME.navCalculators },
-  { to: "/mantras", label: "Mantras", testid: "nav-mantras" },
-  { to: "/blog", label: "Journal", testid: "nav-blog" },
-  { to: "/consultation", label: "Consultation", testid: HOME.navConsultation },
+  { to: "/courses", key: "nav.courses", testid: HOME.navCourses },
+  { to: "/events", key: "nav.events", testid: "nav-events" },
+  { to: "/calendar", key: "nav.calendar", testid: "nav-calendar" },
+  { to: "/mentors", key: "nav.mentors", testid: "nav-mentors" },
+  { to: "/calculators", key: "nav.tools", testid: HOME.navCalculators },
+  { to: "/mantras", key: "nav.mantras", testid: "nav-mantras" },
+  { to: "/blog", key: "nav.journal", testid: "nav-blog" },
+  { to: "/consultation", key: "nav.consultation", testid: HOME.navConsultation },
+  { to: "/community", key: "nav.community", testid: "nav-community" },
 ];
 
 function portalPath(role) {
@@ -30,6 +33,7 @@ function portalPath(role) {
 }
 
 export default function Layout({ children }) {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
@@ -40,10 +44,12 @@ export default function Layout({ children }) {
 
   const onLogout = async () => { await logout(); nav("/"); };
 
-  // The Learner Dashboard reads better on a clean, flat theme background —
-  // the celestial artwork stays everywhere else.
-  const isLearnerDashboard = loc.pathname.startsWith("/learner");
-  const pageBackground = theme === "dark" || isLearnerDashboard ? undefined : {
+  // The Learner Dashboard, the real-time Community chat, and the Staff/Admin
+  // portals read better on a clean, flat theme background — the celestial
+  // artwork stays everywhere else.
+  const isFlatBackground = loc.pathname.startsWith("/learner") || loc.pathname.startsWith("/community")
+    || loc.pathname.startsWith("/staff") || loc.pathname.startsWith("/admin");
+  const pageBackground = theme === "dark" || isFlatBackground ? undefined : {
     backgroundImage: "linear-gradient(hsl(var(--background) / 0.7), hsl(var(--background) / 0.7)), url(/assets/celestial-temple-bg.png)",
     backgroundSize: "cover",
     backgroundPosition: "center top",
@@ -52,30 +58,31 @@ export default function Layout({ children }) {
   };
 
   return (
-    <div className={`min-h-screen noise-overlay relative ${isLearnerDashboard ? "bg-background" : "bg-parchment"}`} style={pageBackground}>
-      {theme === "dark" && (
+    <div className={`min-h-screen noise-overlay relative ${isFlatBackground ? "bg-background" : "bg-parchment"}`} style={pageBackground}>
+      {theme === "dark" && !isFlatBackground && (
         <div className="dark-video-layer">
           <video autoPlay muted loop playsInline
             src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260701_083907_581a119a-89b7-4c9f-a6ef-560625e0086f.mp4" />
         </div>
       )}
       <header className="sticky top-4 md:top-6 z-50 px-4 md:px-6">
-        <div className="mx-auto max-w-6xl glass navbar-glow rounded-full shadow-float h-16 flex items-center gap-6 px-5 md:px-8">
+        <div className="mx-auto max-w-6xl glass navbar-glow rounded-full shadow-float h-16 flex items-center gap-6 px-5 md:px-5">
           <Link to="/" data-testid={HOME.navLogo} className="flex items-baseline gap-2 group shrink-0">
             <span className="font-display text-2xl font-bold tracking-tight text-gradient-cosmic">Tredev Learn</span>
           </Link>
-          <nav className="hidden lg:flex flex-1 items-center justify-center gap-6">
+          <nav className="hidden xl:flex flex-1 items-center justify-center gap-4 min-w-0">
             {NAV.map((n) => (
               <Link key={n.to} to={n.to} data-testid={n.testid}
                 className={`text-sm font-medium font-sans transition-colors pb-1 whitespace-nowrap ${loc.pathname.startsWith(n.to) ? "text-accent border-b-2 border-accent" : "text-foreground/80 hover:text-accent link-underline"}`}>
-                {n.label}
+                {t(n.key)}
               </Link>
             ))}
           </nav>
-          <div className="ml-auto lg:ml-0 flex items-center gap-2 shrink-0">
+          <div className="ml-auto xl:ml-0 flex items-center gap-2 shrink-0">
+            <LanguageToggle />
             <button onClick={toggle} data-testid={HOME.themeToggle}
               className="w-9 h-9 rounded-full border border-border hover:bg-muted flex items-center justify-center transition-colors"
-              aria-label="Toggle theme">
+              aria-label={t("theme.toggle")}>
               {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             {user ? (
@@ -96,40 +103,40 @@ export default function Layout({ children }) {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <Link to={portalPath(user.role)} data-testid="menu-portal"><User className="w-4 h-4 mr-2"/>My Portal</Link>
+                    <Link to={portalPath(user.role)} data-testid="menu-portal"><User className="w-4 h-4 mr-2"/>{t("nav.myPortal")}</Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to="/certificates" data-testid="menu-certificates">My Certificates</Link>
+                    <Link to="/certificates" data-testid="menu-certificates">{t("nav.myCertificates")}</Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={onLogout} data-testid={HOME.navLogout}>
-                    <LogOut className="w-4 h-4 mr-2" /> Logout
+                    <LogOut className="w-4 h-4 mr-2" /> {t("nav.logout")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
               <>
                 <Link to="/login" data-testid={HOME.navLogin} className="hidden sm:inline-flex">
-                  <Button variant="ghost" size="sm">Sign in</Button>
+                  <Button variant="ghost" size="sm">{t("nav.signIn")}</Button>
                 </Link>
                 <Link to="/register" data-testid={HOME.navRegister}>
                   <Button size="sm" className="rounded-full px-5 bg-primary text-primary-foreground hover:opacity-90 border-0">
-                    Enroll now
+                    {t("nav.enrollNow")}
                   </Button>
                 </Link>
               </>
             )}
             <button onClick={() => setMobileOpen((o) => !o)} data-testid="nav-mobile"
-              className="lg:hidden w-9 h-9 rounded-full border border-border flex items-center justify-center">
+              className="xl:hidden w-9 h-9 rounded-full border border-border flex items-center justify-center">
               {mobileOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
           </div>
         </div>
         {mobileOpen && (
-          <div className="lg:hidden mx-auto max-w-6xl mt-2 rounded-3xl border border-border bg-popover px-5 py-4 grid gap-2 shadow-float">
+          <div className="xl:hidden mx-auto max-w-6xl mt-2 rounded-3xl border border-border bg-popover px-5 py-4 grid gap-2 shadow-float">
             {NAV.map((n) => (
               <Link key={n.to} to={n.to} className="text-sm py-2" data-testid={`m-${n.testid}`}>
-                {n.label}
+                {t(n.key)}
               </Link>
             ))}
           </div>
@@ -141,46 +148,46 @@ export default function Layout({ children }) {
           <div>
             <div className="font-display text-2xl font-bold text-gradient-cosmic">Tredev Learn</div>
             <p className="text-sm text-muted-foreground mt-3 leading-relaxed">
-              A place to study the Vedic traditions rigorously. Not a place to buy predictions about your life.
+              {t("footer.tagline")}
             </p>
             <div className="mt-5 flex gap-3">
-              {["4.8★ Google", "6L+ Learners", "51+ Yrs Legacy"].map((s) => (
+              {[t("footer.badgeRating"), t("footer.badgeLearners"), t("footer.badgeLegacy")].map((s) => (
                 <span key={s} className="text-[10px] chip bg-muted text-accent">{s}</span>
               ))}
             </div>
           </div>
           <div>
-            <div className="eyebrow mb-3">Study</div>
+            <div className="eyebrow mb-3">{t("footer.study")}</div>
             <ul className="text-sm space-y-2">
-              <li><Link to="/courses" className="link-underline">All courses</Link></li>
-              <li><Link to="/courses?type=sadhana" className="link-underline">Sadhanas</Link></li>
-              <li><Link to="/courses?type=masterclass" className="link-underline">Free masterclasses</Link></li>
-              <li><Link to="/events" className="link-underline">Upcoming events</Link></li>
-              <li><Link to="/mentors" className="link-underline">Meet the mentors</Link></li>
+              <li><Link to="/courses" className="link-underline">{t("footer.allCourses")}</Link></li>
+              <li><Link to="/courses?type=sadhana" className="link-underline">{t("footer.sadhanas")}</Link></li>
+              <li><Link to="/courses?type=masterclass" className="link-underline">{t("footer.masterclasses")}</Link></li>
+              <li><Link to="/events" className="link-underline">{t("footer.upcomingEvents")}</Link></li>
+              <li><Link to="/mentors" className="link-underline">{t("footer.meetMentors")}</Link></li>
             </ul>
           </div>
           <div>
-            <div className="eyebrow mb-3">Free tools</div>
+            <div className="eyebrow mb-3">{t("footer.freeTools")}</div>
             <ul className="text-sm space-y-2">
-              <li><Link to="/calculators" className="link-underline">Panchang · Kundli · Numerology</Link></li>
-              <li><Link to="/calculators" className="link-underline">Tarot · Ram Shalākā</Link></li>
-              <li><Link to="/shloka-of-the-day" className="link-underline">Shloka of the day</Link></li>
-              <li><Link to="/consultation" className="link-underline">Free pathway consultation</Link></li>
+              <li><Link to="/calculators" className="link-underline">{t("footer.toolsPanchang")}</Link></li>
+              <li><Link to="/calculators" className="link-underline">{t("footer.toolsTarot")}</Link></li>
+              <li><Link to="/shloka-of-the-day" className="link-underline">{t("footer.shloka")}</Link></li>
+              <li><Link to="/consultation" className="link-underline">{t("footer.freeConsultation")}</Link></li>
             </ul>
           </div>
           <div>
-            <div className="eyebrow mb-3">Trust</div>
+            <div className="eyebrow mb-3">{t("footer.trust")}</div>
             <ul className="text-sm space-y-2">
-              <li><Link to="/verify" className="link-underline">Verify a certificate</Link></li>
-              <li><Link to="/blog" className="link-underline">Journal</Link></li>
-              <li><Link to="/calendar" className="link-underline">Festival calendar</Link></li>
-              <li><Link to="/about" className="link-underline">About us</Link></li>
-              <li><span className="text-muted-foreground">Ācharya sign-off · every lesson</span></li>
+              <li><Link to="/verify" className="link-underline">{t("footer.verify")}</Link></li>
+              <li><Link to="/blog" className="link-underline">{t("nav.journal")}</Link></li>
+              <li><Link to="/calendar" className="link-underline">{t("footer.festivalCalendar")}</Link></li>
+              <li><Link to="/about" className="link-underline">{t("footer.about")}</Link></li>
+              <li><span className="text-muted-foreground">{t("footer.acharyaSignoff")}</span></li>
             </ul>
           </div>
         </div>
         <div className="border-t border-border py-5 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Tredev Learn — built for serious study. · Structured like a university. Accessible like a streaming site. Credentialed like a professional course.
+          © {new Date().getFullYear()} Tredev Learn — {t("footer.copyright")}
         </div>
       </footer>
       <FloatingChat />

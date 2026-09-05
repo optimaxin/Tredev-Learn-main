@@ -76,6 +76,7 @@ export default function QueriesStaff() {
     loadMessages(selected.id);
     const id = setInterval(() => loadMessages(selected.id), MSG_POLL_MS);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, loadMessages]);
 
   const handleSend = async (text) => {

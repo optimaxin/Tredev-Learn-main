@@ -43,6 +43,7 @@ COLUMNS = {
         "modules": "jsonb", "image_url": "text", "is_published": "bool", "festival": "text",
         "start_date": "text", "created_at": "text", "created_by": "uuid",
         "approved_by_acharya": "bool", "approval_notes": "text", "approved_at": "text",
+        "title_hi": "text", "subtitle_hi": "text", "description_hi": "text",
     },
     "enrollments": {
         "id": "uuid", "user_id": "uuid", "offering_id": "uuid", "enrolled_at": "text",
@@ -75,7 +76,7 @@ COLUMNS = {
         "started_at": "text", "time_taken_seconds": "int",
     },
     "doubts": {
-        "id": "uuid", "offering_id": "uuid", "question": "text", "asked_by": "uuid",
+        "id": "uuid", "offering_id": "uuid", "lesson_id": "text", "question": "text", "asked_by": "uuid",
         "asked_by_name": "text", "answer": "text", "answered_by": "uuid",
         "answered_by_name": "text", "answered_at": "text", "status": "text",
         "created_at": "text",
@@ -123,6 +124,7 @@ COLUMNS = {
         "id": "uuid", "slug": "text", "title": "text", "category": "text", "excerpt": "text",
         "cover_image": "text", "author_name": "text", "read_time": "text", "body": "text",
         "created_at": "text",
+        "title_hi": "text", "excerpt_hi": "text", "body_hi": "text",
     },
     "webinars": {
         "id": "uuid", "title": "text", "cover_image": "text", "starts_at": "text",
@@ -157,6 +159,19 @@ COLUMNS = {
     "query_messages": {
         "id": "uuid", "ticket_id": "uuid", "sender_id": "uuid", "sender_role": "text",
         "message_text": "text", "created_at": "text",
+    },
+    "chat_channels": {
+        "id": "uuid", "name": "text", "type": "text", "course_id": "uuid",
+        "is_read_only": "bool", "created_at": "text", "created_by": "uuid",
+        "join_token": "text",
+    },
+    "chat_messages": {
+        "id": "uuid", "channel_id": "uuid", "user_id": "uuid", "user_name": "text",
+        "user_role": "text", "content": "text", "attachment_url": "text",
+        "is_deleted": "bool", "created_at": "text",
+    },
+    "chat_channel_members": {
+        "id": "uuid", "channel_id": "uuid", "user_id": "uuid", "joined_at": "text",
     },
 }
 

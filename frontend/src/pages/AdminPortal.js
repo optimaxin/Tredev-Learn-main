@@ -9,7 +9,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 
-const CAPABILITIES = ["course_builder", "quiz_author", "assessment_author", "session_author", "journal_author", "grader", "doubts", "consultations", "cohorts"];
+const CAPABILITIES = ["course_builder", "offerings", "quiz_author", "assessment_author", "session_author", "webinars", "mantras", "certs", "queries", "mentors", "calendar", "journal_author", "grader", "doubts", "consultations"];
+const CAPABILITY_LABELS = {
+  course_builder: "Course builder",
+  offerings: "All offerings",
+  quiz_author: "Quizzes",
+  assessment_author: "Assessments",
+  session_author: "Live sessions",
+  webinars: "Webinars",
+  mantras: "Mantras",
+  certs: "Certificates",
+  queries: "Queries",
+  mentors: "Mentors",
+  calendar: "Festival calendar",
+  journal_author: "Journal",
+  grader: "Grading",
+  doubts: "Doubts",
+  consultations: "Consultations",
+};
 const ROLES = ["learner", "acharya", "academic_staff", "admin", "super_admin"];
 const FEATURE_LABELS = {
   build: "Course builder",
@@ -26,6 +43,10 @@ const FEATURE_LABELS = {
   assessments: "Assessments",
   journal: "Journal (Blog)",
   grading: "Grading",
+  queries: "Queries",
+  mentors: "Mentors",
+  calendar: "Festival calendar",
+  community_chat: "Community Chat",
 };
 
 export default function AdminPortal() {
@@ -151,7 +172,7 @@ export default function AdminPortal() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Staff member</TableHead>
-                  {CAPABILITIES.map((c)=>(<TableHead key={c} className="text-center capitalize">{c.replace("_"," ")}</TableHead>))}
+                  {CAPABILITIES.map((c)=>(<TableHead key={c} className="text-center">{CAPABILITY_LABELS[c] || c.replace("_"," ")}</TableHead>))}
                 </TableRow>
               </TableHeader>
               <TableBody>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import { fetchDailyVerse } from "@/lib/dailyVerse";
 import { Button } from "@/components/ui/button";
@@ -9,23 +10,20 @@ import CourseCard from "@/components/CourseCard";
 import MentorCard from "@/components/MentorCard";
 import {
   Star, Clock, Sparkles, Play,
-  Hash, Compass, Hand, Languages, ScrollText, Wand2, ArrowRight, CheckCircle2, Quote
+  Calculator, Compass, Hand, Languages, ScrollText, Wand2, ArrowRight, CheckCircle2, Quote,
+  CalendarDays, Spade
 } from "lucide-react";
 
 const PORTRAIT = "/assets/person.png";
 
-const HERO = {
-  title: "Unlock Ancient Cosmic Wisdom with Authentic Astrology & Vedic Sciences",
-  subtitle: "Master Kundli creation, decipher life paths through Numerology, and gain intuitive insights with Tarot. Join our community of lifelong learners and professional educators on a journey to cosmic harmony.",
-};
-
 const FREE_TOOLS = [
-  { icon: Hash, name: "Numerology", desc: "Your Mūlāṅka, Bhāgyāṅka & destiny number in seconds.", to: "/calculators", accent: "from-amber-500 to-orange-500" },
-  { icon: Compass, name: "Kundli", desc: "Twelve-house birth chart as a study object.", to: "/calculators", accent: "from-primary to-secondary" },
-  { icon: Sparkles, name: "Tarot Reflection", desc: "Three-card spread — a mirror, not a prophecy.", to: "/calculators", accent: "from-primary/80 to-secondary" },
-  { icon: Hand, name: "Rāma Śalākā", desc: "Ask Śrī Rāma — reflective counsel from the tradition.", to: "/calculators", accent: "from-orange-600 to-amber-500" },
-  { icon: Languages, name: "Devanāgarī Translit", desc: "IAST → Devanāgarī, on the fly.", to: "/calculators", accent: "from-secondary to-primary" },
-  { icon: ScrollText, name: "Shloka of the Day", desc: "One verse. Fully attributed. Every day.", to: "/shloka-of-the-day", accent: "from-amber-400 to-yellow-500" },
+  { id: "panchang", icon: CalendarDays, to: "/calculators?tab=panchang", accent: "from-sky-500 to-blue-600" },
+  { id: "numerology", icon: Calculator, to: "/calculators?tab=numerology", accent: "from-amber-500 to-orange-500" },
+  { id: "kundli", icon: Compass, to: "/calculators?tab=kundli", accent: "from-primary to-secondary" },
+  { id: "tarot", icon: Spade, to: "/calculators?tab=tarot", accent: "from-primary/80 to-secondary" },
+  { id: "shalaka", icon: Hand, to: "/calculators?tab=shalaka", accent: "from-orange-600 to-amber-500" },
+  { id: "translit", icon: Languages, to: "/calculators?tab=translit", accent: "from-secondary to-primary" },
+  { id: "shlokaOfDay", icon: ScrollText, to: "/shloka-of-the-day", accent: "from-amber-400 to-yellow-500" },
 ];
 
 const HERO_MANTRA = "ॐ सह नाववतु । सह नौ भुनक्तु । सह वीर्यं करवावहै । • ";
@@ -37,6 +35,7 @@ const FEATURED_IN = [
 ];
 
 function Hero({ stats }) {
+  const { t } = useTranslation();
   const rating = stats?.google_rating || 4.8;
   const learners = Math.round((stats?.learners_display || 620000) / 1000);
   return (
@@ -51,21 +50,21 @@ function Hero({ stats }) {
         <div className="grid lg:grid-cols-[1.15fr_1fr] gap-10 items-center min-h-[560px]">
           <div className="fade-in-up">
             <span className="chip bg-card/90 text-secondary border border-secondary/40 shadow-sm" data-testid="hero-tag">
-              <Sparkles className="w-3 h-3" /> {rating}★ Rated · {learners}K+ Students Certified
+              <Sparkles className="w-3 h-3" /> {t("landing.hero.badge", { rating, learners })}
             </span>
             <h1 className="mt-6 font-hero text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.02] tracking-tight text-foreground" data-testid="landing-hero">
-              {HERO.title}
+              {t("landing.hero.title")}
             </h1>
-            <p className="mt-6 text-lg text-foreground/80 leading-relaxed max-w-xl">{HERO.subtitle}</p>
+            <p className="mt-6 text-lg text-foreground/80 leading-relaxed max-w-xl">{t("landing.hero.subtitle")}</p>
             <div className="mt-8 flex flex-wrap gap-4">
               <Link to="/courses" data-testid={HOME.ctaExplore}>
                 <Button size="lg" className="rounded-full h-14 px-10 bg-primary text-primary-foreground border-0 hover:opacity-95">
-                  Explore Courses
+                  {t("landing.hero.exploreCourses")}
                 </Button>
               </Link>
               <Link to="/events">
                 <Button size="lg" variant="outline" className="rounded-full h-14 px-10 border-primary/40 hover:border-primary">
-                  <Play className="w-4 h-4 mr-2" /> Join Webinar
+                  <Play className="w-4 h-4 mr-2" /> {t("landing.hero.joinWebinar")}
                 </Button>
               </Link>
             </div>
@@ -122,11 +121,11 @@ function Hero({ stats }) {
       <div className="mt-16 site-container">
         <div className="glass rounded-2xl p-6 md:p-8 grid grid-cols-2 md:grid-cols-5 gap-6 border border-accent/30" data-testid="stats-ribbon">
           {[
-            { n: `${Math.round((stats?.learners_display || 620000) / 1000)}K+`, l: "Learners" },
-            { n: `${stats?.paths_display || 60}+`, l: "Learning paths" },
-            { n: `${stats?.google_rating || 4.8}★`, l: "Google rating" },
-            { n: `${stats?.mentors_display || 30}+`, l: "Expert mentors" },
-            { n: `${stats?.years_of_legacy || 51}+`, l: "Years of legacy" },
+            { n: `${Math.round((stats?.learners_display || 620000) / 1000)}K+`, l: t("landing.stats.learners") },
+            { n: `${stats?.paths_display || 60}+`, l: t("landing.stats.learningPaths") },
+            { n: `${stats?.google_rating || 4.8}★`, l: t("landing.stats.googleRating") },
+            { n: `${stats?.mentors_display || 30}+`, l: t("landing.stats.expertMentors") },
+            { n: `${stats?.years_of_legacy || 51}+`, l: t("landing.stats.yearsLegacy") },
           ].map((s, i) => (
             <div key={i} className={`text-center md:text-left ${i > 0 ? "md:border-l md:border-border md:pl-6" : ""}`}>
               <div className="font-display text-3xl md:text-4xl font-bold tabular text-gradient-cosmic">{s.n}</div>
@@ -159,10 +158,11 @@ function SubjectMarquee() {
 }
 
 function FeaturedIn() {
+  const { t } = useTranslation();
   return (
     <section className="py-8 border-b border-border">
       <div className="site-container">
-        <div className="eyebrow text-center mb-5 opacity-70">As featured in</div>
+        <div className="eyebrow text-center mb-5 opacity-70">{t("landing.featuredIn.eyebrow")}</div>
         <div className="marquee-fade overflow-hidden">
           <div className="flex gap-14 marquee-track-slow w-max items-center px-4">
             {[...FEATURED_IN, ...FEATURED_IN].map((n, i) => (
@@ -176,20 +176,22 @@ function FeaturedIn() {
 }
 
 function CountdownChip({ startsInSeconds }) {
+  const { t } = useTranslation();
   const [remain, setRemain] = useState(startsInSeconds);
   useEffect(() => {
     setRemain(startsInSeconds);
-    const t = setInterval(() => setRemain((r) => Math.max(0, r - 1)), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setRemain((r) => Math.max(0, r - 1)), 1000);
+    return () => clearInterval(timer);
   }, [startsInSeconds]);
-  if (remain <= 0) return <span className="chip bg-secondary text-secondary-foreground">Live now</span>;
+  if (remain <= 0) return <span className="chip bg-secondary text-secondary-foreground">{t("landing.webinars.liveNow")}</span>;
   const d = Math.floor(remain / 86400), h = Math.floor((remain % 86400) / 3600),
         m = Math.floor((remain % 3600) / 60);
   const label = d >= 1 ? `${d}d ${h}h` : `${h}h ${m}m`;
-  return <span className="chip bg-primary/15 text-primary border border-primary/30"><Clock className="w-3 h-3" /> Starts in {label}</span>;
+  return <span className="chip bg-primary/15 text-primary border border-primary/30"><Clock className="w-3 h-3" /> {t("landing.webinars.startsIn", { label })}</span>;
 }
 
 function WebinarsSection({ webinars }) {
+  const { t } = useTranslation();
   if (!webinars?.length) return null;
   return (
     <section className="py-20 md:py-28 relative overflow-hidden">
@@ -198,12 +200,12 @@ function WebinarsSection({ webinars }) {
         <div className="flex items-end justify-between mb-10 flex-wrap gap-4">
           <div>
             <div className="chip bg-secondary/15 text-secondary border border-secondary/30 mb-3">
-              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse" /> LIVE & INTERACTIVE
+              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse" /> {t("landing.webinars.badge")}
             </div>
-            <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">Upcoming Webinars</h2>
-            <p className="mt-3 text-muted-foreground max-w-xl">Short, timely, single-evening intensives — the low-commitment entry into serious study.</p>
+            <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">{t("landing.webinars.heading")}</h2>
+            <p className="mt-3 text-muted-foreground max-w-xl">{t("landing.webinars.subtext")}</p>
           </div>
-          <Link to="/events" className="text-primary link-underline text-sm font-medium">See all →</Link>
+          <Link to="/events" className="text-primary link-underline text-sm font-medium">{t("landing.webinars.seeAll")}</Link>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
           {webinars.slice(0, 4).map((w) => (
@@ -215,7 +217,7 @@ function WebinarsSection({ webinars }) {
                 </div>
                 {w.seats_remaining && w.seats_remaining < 30 && (
                   <div className="absolute top-3 right-3 chip bg-destructive text-destructive-foreground">
-                    Only {w.seats_remaining} seats left
+                    {t("landing.webinars.seatsLeft", { count: w.seats_remaining })}
                   </div>
                 )}
                 <div className="absolute bottom-3 left-3 chip bg-card/95 text-primary">
@@ -230,7 +232,7 @@ function WebinarsSection({ webinars }) {
                     {w.orig_price_inr > w.price_inr && <span className="text-xs text-primary/50 line-through tabular">₹{w.orig_price_inr}</span>}
                   </div>
                   <Button size="sm" className="rounded-full bg-primary text-primary-foreground border-0" data-testid={`webinar-register-${w.id}`}>
-                    Enroll Now
+                    {t("landing.webinars.enrollNow")}
                   </Button>
                 </div>
               </div>
@@ -243,6 +245,7 @@ function WebinarsSection({ webinars }) {
 }
 
 function PopularCoursesSection({ courses }) {
+  const { t } = useTranslation();
   if (!courses?.length) return null;
   return (
     <section className="py-20 md:py-28 relative overflow-hidden">
@@ -250,13 +253,13 @@ function PopularCoursesSection({ courses }) {
       <div className="site-container relative">
         <div className="flex items-end justify-between mb-10 flex-wrap gap-4">
           <div>
-            <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">MOST POPULAR</div>
+            <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">{t("landing.courses.badge")}</div>
             <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">
-              Most <span className="text-gradient-hot">popular courses</span>
+              {t("landing.courses.headingPlain")}<span className="text-gradient-hot">{t("landing.courses.headingHighlight")}</span>
             </h2>
-            <p className="mt-3 text-muted-foreground max-w-xl">The three paths learners begin with most often — a solid place to start.</p>
+            <p className="mt-3 text-muted-foreground max-w-xl">{t("landing.courses.subtext")}</p>
           </div>
-          <Link to="/courses" data-testid="popular-courses-view-all" className="text-primary link-underline text-sm font-medium">View all courses →</Link>
+          <Link to="/courses" data-testid="popular-courses-view-all" className="text-primary link-underline text-sm font-medium">{t("landing.courses.viewAll")}</Link>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {courses.slice(0, 3).map((o) => <CourseCard key={o.id} course={o} />)}
@@ -267,33 +270,32 @@ function PopularCoursesSection({ courses }) {
 }
 
 function FreeToolsSection() {
+  const { t } = useTranslation();
   return (
     <section className="py-20 md:py-28 relative overflow-hidden">
       <div className="orb orb-gold w-96 h-96 right-[10%] top-20" />
       <div className="site-container relative">
         <div className="text-center mb-14">
           <div className="chip bg-accent/15 text-accent border border-accent/30 mb-4">
-            <Wand2 className="w-3 h-3" /> COMPUTE · DON'T FORETELL
+            <Wand2 className="w-3 h-3" /> {t("landing.tools.badge")}
           </div>
           <h2 className="font-display text-4xl md:text-6xl font-bold tracking-tight">
-            Try <span className="text-gradient-hot">Free Tools</span> before you learn
+            {t("landing.tools.headingPlain")}<span className="text-gradient-hot">{t("landing.tools.headingHighlight")}</span>{t("landing.tools.headingSuffix")}
           </h2>
-          <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
-            High-intent, ungated tools. A chart is generated as a <em>study object</em>. Interpretation is the paid course; the computation is the free hook.
-          </p>
+          <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">{t("landing.tools.subtext")}</p>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {FREE_TOOLS.map((t, i) => (
-            <Link to={t.to} key={i} data-testid={`free-tool-${i}`}
+          {FREE_TOOLS.map((tool, i) => (
+            <Link to={tool.to} key={i} data-testid={`free-tool-${i}`}
               className="group rounded-2xl border border-border p-6 bg-card card-elevated flex items-start gap-5 relative overflow-hidden">
-              <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${t.accent} flex items-center justify-center shrink-0 shadow-lg`}>
-                <t.icon className="w-6 h-6 text-white" />
+              <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${tool.accent} flex items-center justify-center shrink-0 shadow-lg`}>
+                <tool.icon className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1">
-                <div className="font-display text-xl font-semibold">{t.name}</div>
-                <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{t.desc}</p>
+                <div className="font-display text-xl font-semibold">{t(`landing.tools.${tool.id}.name`)}</div>
+                <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{t(`landing.tools.${tool.id}.desc`)}</p>
                 <div className="mt-3 text-xs text-primary font-medium flex items-center gap-1">
-                  Try for free <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                  {t("landing.tools.tryFree")} <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
             </Link>
@@ -305,6 +307,7 @@ function FreeToolsSection() {
 }
 
 function MentorsSection({ mentors }) {
+  const { t } = useTranslation();
   if (!mentors?.length) return null;
   return (
     <section className="py-20 md:py-28 bg-gradient-to-b from-transparent via-muted/30 to-transparent relative overflow-hidden">
@@ -312,12 +315,12 @@ function MentorsSection({ mentors }) {
       <div className="site-container relative">
         <div className="flex items-end justify-between mb-10 flex-wrap gap-4">
           <div>
-            <div className="chip bg-accent/15 text-accent border border-accent/30 mb-3">MENTORS</div>
+            <div className="chip bg-accent/15 text-accent border border-accent/30 mb-3">{t("landing.mentors.badge")}</div>
             <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight max-w-3xl">
-              Meet the <span className="text-gradient-hot">keepers</span> of<br />ancient, timeless wisdom
+              {t("landing.mentors.headingPlain")}<span className="text-gradient-hot">{t("landing.mentors.headingHighlight")}</span>{t("landing.mentors.headingSuffix")}
             </h2>
           </div>
-          <Link to="/mentors" className="text-sm text-primary link-underline font-medium">See all →</Link>
+          <Link to="/mentors" className="text-sm text-primary link-underline font-medium">{t("landing.mentors.seeAll")}</Link>
         </div>
       </div>
       <div className="marquee-fade overflow-hidden">
@@ -334,23 +337,23 @@ function MentorsSection({ mentors }) {
 }
 
 function TestimonialsSection({ testimonials }) {
+  const { t } = useTranslation();
   const [idx, setIdx] = useState(0);
   useEffect(() => {
     if (!testimonials?.length) return;
-    const t = setInterval(() => setIdx((i) => (i + 1) % testimonials.length), 5500);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setIdx((i) => (i + 1) % testimonials.length), 5500);
+    return () => clearInterval(timer);
   }, [testimonials?.length]);
   if (!testimonials?.length) return null;
-  const t = testimonials[idx];
   return (
     <section className="py-20 md:py-28 relative overflow-hidden">
       <div className="orb orb-violet w-[500px] h-[500px] left-[-8rem] top-20" />
       <div className="orb orb-saffron w-96 h-96 right-[-4rem] bottom-10" />
       <div className="site-container relative">
         <div className="text-center mb-14">
-          <div className="chip bg-secondary/15 text-secondary border border-secondary/30 mb-4">SUCCESS STORIES</div>
+          <div className="chip bg-secondary/15 text-secondary border border-secondary/30 mb-4">{t("landing.testimonials.badge")}</div>
           <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">
-            1,00,000+ <span className="text-gradient-hot">success stories</span><br />from around the world
+            1,00,000+ <span className="text-gradient-hot">{t("landing.testimonials.headingHighlight")}</span><br />{t("landing.testimonials.headingRest")}
           </h2>
         </div>
         <div className="grid md:grid-cols-3 gap-5">
@@ -379,19 +382,20 @@ function TestimonialsSection({ testimonials }) {
 }
 
 function BlogSection({ blogs }) {
+  const { t } = useTranslation();
   if (!blogs?.length) return null;
   return (
     <section className="py-20 md:py-28 relative">
       <div className="site-container">
         <div className="flex items-end justify-between mb-10 flex-wrap gap-4">
           <div>
-            <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">JOURNAL</div>
+            <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">{t("landing.blog.badge")}</div>
             <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">
-              From the <span className="text-gradient-hot">Tredev Learn</span> Journal
+              {t("landing.blog.headingPrefix")}<span className="text-gradient-hot">Tredev Learn</span>{t("landing.blog.headingSuffix")}
             </h2>
-            <p className="mt-3 text-muted-foreground max-w-xl">Essays and reflections from India's traditions — attributed, cited, and unhurried.</p>
+            <p className="mt-3 text-muted-foreground max-w-xl">{t("landing.blog.subtext")}</p>
           </div>
-          <Link to="/blog" className="text-primary link-underline text-sm font-medium">All essays →</Link>
+          <Link to="/blog" className="text-primary link-underline text-sm font-medium">{t("landing.blog.allEssays")}</Link>
         </div>
         <div className="grid md:grid-cols-3 gap-6">
           {blogs.slice(0, 3).map((b, i) => (
@@ -439,16 +443,15 @@ function initials(name) {
 }
 
 function CommunityMarquee() {
+  const { t } = useTranslation();
   return (
     <section className="py-20 md:py-28 relative overflow-hidden">
       <div className="site-container text-center mb-10">
-        <div className="chip bg-accent/15 text-accent border border-accent/30 mb-4">COMMUNITY</div>
+        <div className="chip bg-accent/15 text-accent border border-accent/30 mb-4">{t("landing.community.badge")}</div>
         <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">
-          More than a course — a <span className="text-gradient-cosmic">learning community</span>
+          {t("landing.community.headingPlain")}<span className="text-gradient-cosmic">{t("landing.community.headingHighlight")}</span>
         </h2>
-        <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">
-          Join a growing network of students, practitioners, and credentialed professionals — turning passion into expertise.
-        </p>
+        <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">{t("landing.community.subtext")}</p>
       </div>
       <div className="site-container">
         <div className="marquee-fade overflow-hidden">
@@ -473,6 +476,7 @@ function CommunityMarquee() {
 }
 
 function SampleCertificateSection() {
+  const { t } = useTranslation();
   const year = new Date().getFullYear();
   return (
     <section className="py-20 md:py-28 relative overflow-hidden" data-testid="sample-certificate-section">
@@ -480,14 +484,11 @@ function SampleCertificateSection() {
       <div className="orb orb-magenta w-80 h-80 right-[8%] bottom-10" />
       <div className="site-container relative">
         <div className="text-center mb-14">
-          <div className="chip bg-accent/15 text-accent border border-accent/30 mb-4">CREDENTIALS · PUBLICLY VERIFIABLE</div>
+          <div className="chip bg-accent/15 text-accent border border-accent/30 mb-4">{t("landing.certificate.badge")}</div>
           <h2 className="font-display text-4xl md:text-6xl font-bold tracking-tight">
-            A certificate <span className="text-gradient-hot">worth putting</span> on your résumé
+            {t("landing.certificate.headingPlain")}<span className="text-gradient-hot">{t("landing.certificate.headingHighlight")}</span>{t("landing.certificate.headingSuffix")}
           </h2>
-          <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
-            Every certificate is Ācharya-signed and carries a code that anyone can verify — publicly, without logging in.
-            This is what yours will look like.
-          </p>
+          <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">{t("landing.certificate.subtext")}</p>
         </div>
 
         {/* Certificate card */}
@@ -625,14 +626,14 @@ function SampleCertificateSection() {
           <div className="mt-8 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-sm text-muted-foreground flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-primary" />
-              Publicly verifiable · non-transferable · revocation goes on-record
+              {t("landing.certificate.caption")}
             </div>
             <div className="flex gap-3">
               <Link to="/verify/TDL-8F3A-DEMO" data-testid="verify-sample-btn">
-                <Button variant="outline" className="rounded-full">Try verification →</Button>
+                <Button variant="outline" className="rounded-full">{t("landing.certificate.tryVerification")}</Button>
               </Link>
               <Link to="/courses">
-                <Button className="rounded-full bg-gradient-hot text-white border-0 btn-glow">Earn yours <ArrowRight className="w-4 h-4 ml-2" /></Button>
+                <Button className="rounded-full bg-gradient-hot text-white border-0 btn-glow">{t("landing.certificate.earnYours")} <ArrowRight className="w-4 h-4 ml-2" /></Button>
               </Link>
             </div>
           </div>
@@ -643,6 +644,7 @@ function SampleCertificateSection() {
 }
 
 function ConsultationCTA() {
+  const { t } = useTranslation();
   return (
     <section className="py-20 md:py-28">
       <div className="site-container">
@@ -651,23 +653,23 @@ function ConsultationCTA() {
           <div className="orb orb-gold w-64 h-64 -bottom-20 -left-10" />
           <div className="relative">
             <Sparkles className="w-6 h-6 text-accent mb-4" />
-            <h2 className="font-display text-4xl md:text-5xl font-bold text-white leading-tight">Unsure where to begin?</h2>
+            <h2 className="font-display text-4xl md:text-5xl font-bold text-white leading-tight">{t("landing.consultation.heading")}</h2>
             <p className="mt-4 text-white/80 leading-relaxed max-w-xl">
-              Many people arrive interested but hesitant — should they study Sanskrit, the Gītā, meditation, jyotiṣa? Rather than lose you to that hesitation, we offer a <strong className="text-accent">free pathway consultation</strong>. Someone from our academic staff will reach out personally, understand your interest, and recommend a starting pathway.
+              {t("landing.consultation.subtextPre")}<strong className="text-accent">{t("landing.consultation.subtextStrong")}</strong>{t("landing.consultation.subtextPost")}
             </p>
             <ul className="mt-6 space-y-2 text-sm text-white/80">
-              <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> Honest pathway advice — not a hard pitch</li>
-              <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> Auto-assigned to the staff member with lightest backlog</li>
-              <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> Consented under DPDP · used to help, not to spam</li>
+              <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> {t("landing.consultation.bullet1")}</li>
+              <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> {t("landing.consultation.bullet2")}</li>
+              <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> {t("landing.consultation.bullet3")}</li>
             </ul>
           </div>
           <div className="relative text-center md:text-right">
             <Link to="/consultation" data-testid={HOME.ctaConsultation}>
               <Button size="lg" className="rounded-full h-14 px-10 bg-gradient-hot text-white btn-glow border-0 text-base">
-                Request my pathway <ArrowRight className="w-5 h-5 ml-2" />
+                {t("landing.consultation.cta")} <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             </Link>
-            <div className="mt-3 text-xs text-white/60">A human at the top of the funnel · not a paywall</div>
+            <div className="mt-3 text-xs text-white/60">{t("landing.consultation.caption")}</div>
           </div>
         </div>
       </div>
@@ -676,6 +678,7 @@ function ConsultationCTA() {
 }
 
 export default function Landing() {
+  const { t } = useTranslation();
   const [shloka, setShloka] = useState(null);
   const [webinars, setWebinars] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -707,9 +710,9 @@ export default function Landing() {
         <section className="py-20 md:py-28 relative">
           <div className="site-container">
             <div className="text-center mb-10">
-              <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">TODAY'S VERSE</div>
+              <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">{t("landing.verse.badge")}</div>
               <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">
-                The verse, as a <span className="text-gradient-hot">first-class object</span>
+                {t("landing.verse.headingPlain")}<span className="text-gradient-hot">{t("landing.verse.headingHighlight")}</span>{t("landing.verse.headingSuffix")}
               </h2>
             </div>
             <ShlokaPlayer verse={shloka} />
