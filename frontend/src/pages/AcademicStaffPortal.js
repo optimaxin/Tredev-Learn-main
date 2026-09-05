@@ -8,9 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, Award, Video, Radio, Zap, FileText, Send, BookOpen, Stamp } from "lucide-react";
-import LessonManager, { LessonEditor } from "@/components/LessonManager";
-import OfferingEditor from "@/components/OfferingEditor";
+import { CheckCircle2, XCircle, Award, Video, Radio, Zap, FileText, Send, Stamp } from "lucide-react";
+import { LessonEditor } from "@/components/LessonManager";
+import OfferingsPanel from "@/components/staff/OfferingsPanel";
 import MantraBuilder from "@/components/MantraBuilder";
 import CertificateModal from "@/components/CertificateDoc";
 import QuizManager from "@/components/QuizManager";
@@ -47,6 +47,17 @@ export default function AcademicStaffPortal() {
   const canAuthorAssessment = user?.role !== "academic_staff" || hasCapability("assessment_author");
   const canManageSessions = user?.role !== "academic_staff" || hasCapability("session_author");
   const canManageJournal = user?.role !== "academic_staff" || hasCapability("journal_author");
+  const canBuildCourse = user?.role !== "academic_staff" || hasCapability("course_builder");
+  const canGrade = user?.role !== "academic_staff" || hasCapability("grader");
+  const canHandleConsultations = user?.role !== "academic_staff" || hasCapability("consultations");
+  const canEditOfferings = user?.role !== "academic_staff" || hasCapability("offerings");
+  const canAnswerDoubts = user?.role !== "academic_staff" || hasCapability("doubts");
+  const canManageWebinars = user?.role !== "academic_staff" || hasCapability("webinars");
+  const canManageMantras = user?.role !== "academic_staff" || hasCapability("mantras");
+  const canManageCerts = user?.role !== "academic_staff" || hasCapability("certs");
+  const canHandleQueries = user?.role !== "academic_staff" || hasCapability("queries");
+  const canManageMentors = user?.role !== "academic_staff" || hasCapability("mentors");
+  const canManageCalendar = user?.role !== "academic_staff" || hasCapability("calendar");
   const [offerings, setOfferings] = useState([]);
   const [consultations, setConsultations] = useState([]);
   const [acharyas, setAcharyas] = useState([]);
@@ -325,7 +336,7 @@ export default function AcademicStaffPortal() {
           {isEnabled("offerings") && <TabsTrigger value="offerings" data-testid="staff-tab-offerings">All offerings ({offerings.length})</TabsTrigger>}
           {isEnabled("sessions") && <TabsTrigger value="sessions" data-testid="staff-tab-sessions">Schedule sessions</TabsTrigger>}
           {isEnabled("webinars") && <TabsTrigger value="webinars" data-testid="staff-tab-webinars">Webinars</TabsTrigger>}
-          <TabsTrigger value="calendar" data-testid="staff-tab-calendar">Calendar</TabsTrigger>
+          {isEnabled("calendar") && <TabsTrigger value="calendar" data-testid="staff-tab-calendar">Calendar</TabsTrigger>}
           {isEnabled("mantras") && <TabsTrigger value="mantras" data-testid="staff-tab-mantras">Mantras ({mantras.length})</TabsTrigger>}
           {isEnabled("content-review") && <TabsTrigger value="content-review" data-testid="staff-tab-content-review">Ācharya content ({pendingContent.length})</TabsTrigger>}
           {isEnabled("queries") && <TabsTrigger value="queries" data-testid="staff-tab-queries">Queries</TabsTrigger>}
@@ -340,6 +351,12 @@ export default function AcademicStaffPortal() {
         {/* COURSE BUILDER */}
         {isEnabled("build") && (
         <TabsContent value="build" className="mt-8">
+          {!canBuildCourse && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive max-w-4xl" data-testid="build-author-disabled">
+              Course building has not been granted to you by admin — you can't create new offerings.
+            </div>
+          )}
+          {canBuildCourse && (
           <form onSubmit={createOffering} className="rounded-2xl border border-border p-8 bg-card grid md:grid-cols-2 gap-5 max-w-4xl" data-testid="offering-form">
             <div className="md:col-span-2 flex items-center gap-2">
               <FileText className="w-5 h-5 text-primary" />
@@ -405,57 +422,23 @@ export default function AcademicStaffPortal() {
             </Button>
             <p className="md:col-span-2 text-xs text-muted-foreground">Nothing is published under an Ācharya's name until they've approved it.</p>
           </form>
+          )}
         </TabsContent>
         )}
 
-        {/* OFFERINGS LIST — with Ācharya names visible */}
+        {/* OFFERINGS — card grid, click through to a tabbed course detail view */}
         {isEnabled("offerings") && (
-        <TabsContent value="offerings" className="mt-8 space-y-3">
-          {offerings.map((o)=>{
-            const acharya = acharyas.find(a => a.id === o.acharya_id);
-            const lessonCount = Array.isArray(o.modules) ? o.modules.length : 0;
-            return (
-              <details key={o.id} className="rounded-xl border border-border bg-card" data-testid={`staff-offering-${o.id}`}>
-                <summary className="p-5 flex items-center gap-4 flex-wrap cursor-pointer list-none">
-                  <div className="flex-1 min-w-[240px]">
-                    <div className="font-display font-semibold text-lg">{o.title}</div>
-                    <div className="text-xs text-muted-foreground">{o.subject} · {o.type.replace("_"," ")}</div>
-                    {acharya && <div className="text-xs text-primary mt-1">Ācharya: {acharya.name}</div>}
-                  </div>
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-widest gap-1">
-                    <BookOpen className="w-3 h-3" /> {lessonCount} lesson{lessonCount === 1 ? "" : "s"}
-                  </Badge>
-                  <Badge variant={o.is_published ? "default" : "outline"} className="text-[10px] uppercase tracking-widest">
-                    {o.is_published ? "Published" : "Draft"}
-                  </Badge>
-                  <Badge variant={o.approved_by_acharya ? "default" : "outline"} className="text-[10px] uppercase tracking-widest">
-                    {o.approved_by_acharya ? "Ācharya ✓" : "Awaiting sign-off"}
-                  </Badge>
-                </summary>
-                <div className="border-t border-border p-5 space-y-4">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <label className="eyebrow">Assigned Ācharya</label>
-                    <Select value={o.acharya_id || ""} onValueChange={(v)=>assignAcharya(o.id, v)}>
-                      <SelectTrigger className="h-10 w-64" data-testid={`assign-acharya-${o.id}`}><SelectValue placeholder="Assign an Ācharya…"/></SelectTrigger>
-                      <SelectContent>{acharyas.map(a=><SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
-                    </Select>
-                    {!o.acharya_id && <span className="text-xs text-destructive">Not routed — assign an Ācharya to send for review</span>}
-                  </div>
-                  <OfferingEditor offering={o} onSaved={load} />
-                  {o.approval_notes && !o.approved_by_acharya && (
-                    <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-xs">
-                      <strong>Ācharya requested changes:</strong> {o.approval_notes}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-display font-semibold">Lessons — recorded video & written content</h4>
-                  </div>
-                  <LessonManager offering={o} onSaved={load} />
-                  <AssessmentBuilder offeringId={o.id} canAuthorQuiz={canAuthorAssessment} enabled={isEnabled("assessments")} />
-                </div>
-              </details>
-            );
-          })}
+        <TabsContent value="offerings" className="mt-8">
+          <OfferingsPanel
+            offerings={offerings}
+            acharyas={acharyas}
+            canEditOfferings={canEditOfferings}
+            canAuthorAssessment={canAuthorAssessment}
+            canAnswerDoubts={canAnswerDoubts}
+            assessmentsEnabled={isEnabled("assessments")}
+            assignAcharya={assignAcharya}
+            load={load}
+          />
         </TabsContent>
         )}
 
@@ -586,6 +569,12 @@ export default function AcademicStaffPortal() {
         {/* WEBINARS */}
         {isEnabled("webinars") && (
         <TabsContent value="webinars" className="mt-8 grid lg:grid-cols-[1fr_1.4fr] gap-8">
+          {!canManageWebinars && (
+            <div className="lg:col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="webinars-author-disabled">
+              Webinars has not been granted to you by admin — you can't create, edit, or delete webinars.
+            </div>
+          )}
+          {canManageWebinars && (
           <form onSubmit={createWebinar} className="rounded-2xl border border-border p-6 bg-card space-y-4" data-testid="webinar-form">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-primary" />
@@ -640,13 +629,14 @@ export default function AcademicStaffPortal() {
             </div>
             <Button type="submit" data-testid="webinar-submit" className="w-full rounded-full h-11 bg-gradient-hot text-white border-0">Publish webinar</Button>
           </form>
+          )}
 
-          <div>
+          <div className={canManageWebinars ? "" : "lg:col-span-2"}>
             <h3 className="font-display font-bold text-xl mb-1">All webinars</h3>
-            <p className="text-xs text-muted-foreground mb-4">Click a webinar to edit or delete it.</p>
+            {canManageWebinars && <p className="text-xs text-muted-foreground mb-4">Click a webinar to edit or delete it.</p>}
             <div className="space-y-3">
               {webinars.map((w) => (
-                editWebinar?.id === w.id ? (
+                canManageWebinars && editWebinar?.id === w.id ? (
                   <div key={w.id} className="rounded-xl border border-primary/40 p-4 bg-card space-y-3" data-testid={`edit-webinar-${w.id}`}>
                     <Input value={editWebinar.title} onChange={(e)=>setEditWebinar({...editWebinar, title:e.target.value})} className="h-10" placeholder="Title" />
                     <Textarea value={editWebinar.description} onChange={(e)=>setEditWebinar({...editWebinar, description:e.target.value})} className="min-h-[70px]" placeholder="Description" />
@@ -672,7 +662,9 @@ export default function AcademicStaffPortal() {
                     </div>
                   </div>
                 ) : (
-                  <button key={w.id} onClick={()=>startEditWebinar(w)} className="w-full text-left rounded-xl border border-border p-4 bg-card flex items-center gap-4 hover:border-primary/50 transition-colors" data-testid={`staff-webinar-${w.id}`}>
+                  <button key={w.id} onClick={()=>canManageWebinars && startEditWebinar(w)} disabled={!canManageWebinars}
+                    className={`w-full text-left rounded-xl border border-border p-4 bg-card flex items-center gap-4 ${canManageWebinars ? "hover:border-primary/50 transition-colors" : "cursor-default opacity-80"}`}
+                    data-testid={`staff-webinar-${w.id}`}>
                     {w.cover_image
                       ? <img src={w.cover_image} alt="" className="w-20 h-14 rounded-lg object-cover shrink-0" />
                       : <div className="w-20 h-14 rounded-lg bg-muted grid place-items-center text-muted-foreground shrink-0"><Zap className="w-4 h-4" /></div>}
@@ -694,14 +686,20 @@ export default function AcademicStaffPortal() {
         )}
 
         {/* CALENDAR — Hindu festival CSV management, feeds the public Calendar section */}
+        {isEnabled("calendar") && (
         <TabsContent value="calendar" className="mt-8">
-          <FestivalManager />
+          <FestivalManager canAuthor={canManageCalendar} />
         </TabsContent>
+        )}
 
         {/* MANTRAS — by deity, linked to the festival calendar */}
         {isEnabled("mantras") && (
         <TabsContent value="mantras" className="mt-8 grid lg:grid-cols-[1.4fr_1fr] gap-8">
-          <MantraBuilder onSaved={load} />
+          {canManageMantras ? <MantraBuilder onSaved={load} /> : (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive h-fit" data-testid="mantras-author-disabled">
+              Mantras has not been granted to you by admin — you can't add or delete mantras.
+            </div>
+          )}
           <div>
             <h3 className="font-display font-bold text-xl mb-4">All mantras ({mantras.length})</h3>
             <div className="space-y-3">
@@ -710,7 +708,7 @@ export default function AcademicStaffPortal() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="outline" className="text-[10px] uppercase tracking-widest text-accent border-accent/40">{mm.deity}</Badge>
                     <span className="font-display font-semibold">{mm.title}</span>
-                    <button onClick={()=>deleteMantra(mm.id)} className="text-muted-foreground hover:text-destructive text-xs ml-auto" data-testid={`mantra-delete-${mm.id}`}>Delete</button>
+                    {canManageMantras && <button onClick={()=>deleteMantra(mm.id)} className="text-muted-foreground hover:text-destructive text-xs ml-auto" data-testid={`mantra-delete-${mm.id}`}>Delete</button>}
                   </div>
                   {mm.devanagari && <div className="font-devanagari text-base mt-2 leading-relaxed line-clamp-2">{mm.devanagari}</div>}
                   {mm.audio_url && <audio src={mm.audio_url} controls className="mt-2 w-full h-8" />}
@@ -773,13 +771,23 @@ export default function AcademicStaffPortal() {
         {/* QUERIES */}
         {isEnabled("queries") && (
         <TabsContent value="queries" className="mt-8">
-          <QueriesStaff />
+          {canHandleQueries ? <QueriesStaff /> : (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="queries-author-disabled">
+              Queries has not been granted to you by admin — ask an admin to grant the 'queries' capability.
+            </div>
+          )}
         </TabsContent>
         )}
 
         {/* CERTIFICATES — issue new + grouped by user */}
         {isEnabled("certs") && (
         <TabsContent value="certs" className="mt-8 space-y-8">
+          {!canManageCerts && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="certs-author-disabled">
+              Certificates has not been granted to you by admin — you can view issued certificates below but can't issue new ones or approve requests.
+            </div>
+          )}
+          {canManageCerts && (
           <form onSubmit={issueCert} className="rounded-2xl border border-border p-6 bg-card grid md:grid-cols-3 gap-4 items-end max-w-4xl" data-testid="issue-cert-form">
             <div className="md:col-span-3 flex items-center gap-2">
               <Award className="w-5 h-5 text-primary" />
@@ -802,8 +810,10 @@ export default function AcademicStaffPortal() {
             <Button type="submit" data-testid="issue-submit" className="rounded-full h-11 bg-gradient-hot text-white border-0">Issue</Button>
             <p className="md:col-span-3 text-xs text-muted-foreground">On issue, the certificate is routed to the course's Ācharya for signature. Once the Ācharya signs, it's published to the learner automatically. (Learners can also request certificates on 100% completion — see “Certificate requests” below.)</p>
           </form>
+          )}
 
           {/* Learner certificate requests — approve to route to the Ācharya */}
+          {canManageCerts && (
           <div data-testid="certs-requests">
             <h3 className="font-display font-bold text-xl mb-4 flex items-center gap-2">
               <Stamp className="w-5 h-5 text-primary" /> Certificate requests ({pendingCerts.length})
@@ -825,6 +835,7 @@ export default function AcademicStaffPortal() {
               {pendingCerts.length === 0 && <div className="text-muted-foreground text-sm">No pending certificate requests.</div>}
             </div>
           </div>
+          )}
 
           {/* Grouped by learner */}
           <div>
@@ -867,6 +878,11 @@ export default function AcademicStaffPortal() {
         {/* CONSULTATIONS */}
         {isEnabled("consultations") && (
         <TabsContent value="consultations" className="mt-8 space-y-4">
+          {!canHandleConsultations && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="consultations-author-disabled">
+              Consultations has not been granted to you by admin — you can view assigned consultations but can't reply or close them.
+            </div>
+          )}
           {consultations.length === 0 && <div className="text-muted-foreground text-sm">No consultations assigned.</div>}
           {groupThreads(consultations, (c) => c.email).map((group) => {
             const first = group.items[0];
@@ -889,6 +905,8 @@ export default function AcademicStaffPortal() {
                       {c.reply && (
                         <div className="mt-2 border-l-2 border-primary pl-3 text-sm text-foreground/90">{c.reply}</div>
                       )}
+                      {canHandleConsultations && (
+                      <>
                       <Textarea value={replyText[c.id]||""} onChange={(e)=>setReplyText({...replyText,[c.id]:e.target.value})}
                         placeholder="Reply — pushed back to their chat widget…" className="mt-3" data-testid={`consult-reply-${c.id}`} />
                       <div className="mt-3 flex gap-2 flex-wrap">
@@ -898,6 +916,8 @@ export default function AcademicStaffPortal() {
                         <Button size="sm" onClick={()=>closeConsult(c,"contacted")} data-testid={`consult-contacted-${c.id}`} variant="outline" className="rounded-full">Mark contacted</Button>
                         <Button size="sm" onClick={()=>closeConsult(c,"closed")} data-testid={`consult-closed-${c.id}`} className="rounded-full bg-gradient-hot text-white border-0">Close</Button>
                       </div>
+                      </>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -917,7 +937,11 @@ export default function AcademicStaffPortal() {
         {/* MENTORS */}
         {isEnabled("mentors") && (
         <TabsContent value="mentors" className="mt-8">
-          <MentorManager />
+          {canManageMentors ? <MentorManager /> : (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="mentors-author-disabled">
+              Mentors has not been granted to you by admin — ask an admin to grant the 'mentors' capability.
+            </div>
+          )}
         </TabsContent>
         )}
 
@@ -931,6 +955,13 @@ export default function AcademicStaffPortal() {
         {/* GRADING — manual grading of paragraph answers, plus per-quiz leaderboard/results */}
         {isEnabled("grading") && (
         <TabsContent value="grading" className="mt-8 space-y-10">
+          {!canGrade && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="grading-author-disabled">
+              Grading has not been granted to you by admin — ask an admin to grant the 'grader' capability.
+            </div>
+          )}
+          {canGrade && (
+          <>
           <div>
             <h3 className="font-display font-bold text-xl mb-4">Pending grading</h3>
             <GradingPanel />
@@ -939,6 +970,8 @@ export default function AcademicStaffPortal() {
             <h3 className="font-display font-bold text-xl mb-4">Leaderboard &amp; results</h3>
             <LeaderboardPanel />
           </div>
+          </>
+          )}
         </TabsContent>
         )}
       </Tabs>

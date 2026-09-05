@@ -101,27 +101,39 @@ const MINOR_DATA = {
   ],
 };
 
-const majorCards = MAJOR.map(([name, keywordsUpright, keywordsReversed, meaningUpright, meaningReversed], i) => ({
-  id: kebab(name),
-  name,
-  arcana: "major",
-  suit: null,
-  number: i,
-  keywordsUpright,
-  keywordsReversed,
-  meaningUpright,
-  meaningReversed,
-}));
+// Public-domain Rider-Waite-Smith artwork (1909), served from /public/tarot-cards.
+// Filenames are each card's name with spaces stripped (e.g. "ace-of-cups" -> "aceofcups.jpeg");
+// these two don't follow that pattern in the source set.
+const IMAGE_OVERRIDES = { "the-lovers": "TheLovers.jpg", strength: "thestrength.jpeg" };
+const cardImage = (id) => `/tarot-cards/${IMAGE_OVERRIDES[id] || `${id.replace(/-/g, "")}.jpeg`}`;
+
+const majorCards = MAJOR.map(([name, keywordsUpright, keywordsReversed, meaningUpright, meaningReversed], i) => {
+  const id = kebab(name);
+  return {
+    id,
+    name,
+    arcana: "major",
+    suit: null,
+    number: i,
+    image: cardImage(id),
+    keywordsUpright,
+    keywordsReversed,
+    meaningUpright,
+    meaningReversed,
+  };
+});
 
 const minorCards = SUITS.flatMap(({ key, label }) =>
   MINOR_DATA[key].map(([keywordsUpright, keywordsReversed, meaningUpright, meaningReversed], i) => {
     const name = `${RANKS[i]} of ${label}`;
+    const id = kebab(name);
     return {
-      id: kebab(name),
+      id,
       name,
       arcana: "minor",
       suit: key,
       number: i + 1,
+      image: cardImage(id),
       keywordsUpright,
       keywordsReversed,
       meaningUpright,
@@ -132,31 +144,31 @@ const minorCards = SUITS.flatMap(({ key, label }) =>
 
 export const TAROT_DECK = [...majorCards, ...minorCards];
 
-export function drawThreeCards() {
-  const shuffled = [...TAROT_DECK];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  const positions = ["Past", "Present", "Future"];
-  return shuffled.slice(0, 3).map((card, i) => ({
-    ...card,
-    position: positions[i],
-    reversed: Math.random() < 0.25,
-  }));
+export const TAROT_CATEGORIES = [
+  { slug: "career", label: "Career", blurb: "Work, money, and your path forward" },
+  { slug: "health", label: "Health", blurb: "Body, mind, and wellbeing" },
+  { slug: "relationship", label: "Relationship", blurb: "Love, family, and connection" },
+  { slug: "yesno", label: "Yes / No", blurb: "A clear answer to a direct question" },
+];
+
+export function drawCard() {
+  const card = TAROT_DECK[Math.floor(Math.random() * TAROT_DECK.length)];
+  return { ...card, reversed: Math.random() < 0.25 };
 }
 
-export function synthesizeReading(spread) {
-  const [past, present, future] = spread;
-  const kw = (card) => (card.reversed ? card.keywordsReversed : card.keywordsUpright)[0];
-  const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
-  const presentMeaning = present.reversed ? present.meaningReversed : present.meaningUpright;
-  return `Your past carries the weight of ${kw(past)}. In the present, ${lower(presentMeaning)} The road ahead points toward ${kw(future)}, a thread still waiting to be drawn taut.`;
+export function synthesizeReading(card, category, question) {
+  const meaning = card.reversed ? card.meaningReversed : card.meaningUpright;
+  const keyword = (card.reversed ? card.keywordsReversed : card.keywordsUpright)[0];
+  const label = category ? category.label.toLowerCase() : "life";
+  const focus = question ? `about "${question}"` : "on your mind";
+  return `For your ${label} question ${focus}: ${meaning} At its heart, this reading points to ${keyword} as the thread guiding your ${label} path forward.`;
 }
 
 if (process.env.NODE_ENV !== "production") {
   console.assert(TAROT_DECK.length === 78, `expected 78 cards, got ${TAROT_DECK.length}`);
   console.assert(new Set(TAROT_DECK.map((c) => c.id)).size === 78, "card ids must be unique");
-  const spread = drawThreeCards();
-  console.assert(new Set(spread.map((c) => c.id)).size === 3, "drawThreeCards must not repeat cards");
+  console.assert(new Set(TAROT_DECK.map((c) => c.image)).size === 78, "card images must be unique");
+  const card = drawCard();
+  console.assert(typeof card.reversed === "boolean", "drawCard must set a reversed flag");
+  console.assert(synthesizeReading(card, TAROT_CATEGORIES[0], "test").length > 0, "synthesizeReading must return text");
 }

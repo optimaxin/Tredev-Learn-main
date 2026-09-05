@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import { ChevronLeft, ChevronRight, Sparkles, ArrowRight, Trophy } from "lucide-react";
 
@@ -7,6 +8,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const todayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 
 function FestivalCard({ f, quiz, featured }) {
+  const { t } = useTranslation();
   const date = new Date(f.date);
   return (
     <div data-testid={`festival-${f.id}`}
@@ -27,19 +29,19 @@ function FestivalCard({ f, quiz, featured }) {
           {f.related_offering_subject && (
             <Link to={`/courses?q=${encodeURIComponent(f.related_offering_subject)}`}
               className="text-xs text-primary inline-flex items-center gap-1 link-underline" data-testid={`festival-related-${f.id}`}>
-              Courses: {f.related_offering_subject} <ArrowRight className="w-3 h-3" />
+              {t("calendarPage.courses")}: {f.related_offering_subject} <ArrowRight className="w-3 h-3" />
             </Link>
           )}
           {f.deity && (
             <Link to={`/mantras?deity=${encodeURIComponent(f.deity)}`}
               className="text-xs text-accent inline-flex items-center gap-1 link-underline" data-testid={`festival-mantras-${f.id}`}>
-              {f.deity} mantras <ArrowRight className="w-3 h-3" />
+              {f.deity} {t("calendarPage.mantras")} <ArrowRight className="w-3 h-3" />
             </Link>
           )}
           {quiz && (
             <Link to={`/quiz/${quiz.id}`} data-testid={`festival-play-win-${f.id}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-gradient-hot text-white text-xs font-semibold px-4 py-1.5 btn-glow animate-glow">
-              <Trophy className="w-3.5 h-3.5" /> Play &amp; Win
+              <Trophy className="w-3.5 h-3.5" /> {t("calendarPage.playAndWin")}
             </Link>
           )}
         </div>
@@ -49,6 +51,7 @@ function FestivalCard({ f, quiz, featured }) {
 }
 
 export default function Calendar() {
+  const { t } = useTranslation();
   const [festivals, setFestivals] = useState([]);
   const [quizzesByFestival, setQuizzesByFestival] = useState({});
   const [cursor, setCursor] = useState(() => { const d = todayStart(); d.setDate(1); return d; });
@@ -83,20 +86,19 @@ export default function Calendar() {
   return (
     <div className="site-container py-16">
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">
-        <Sparkles className="w-3 h-3" /> CALENDAR
+        <Sparkles className="w-3 h-3" /> {t("nav.calendar")}
       </div>
       <h1 className="font-display text-5xl md:text-6xl font-bold tracking-tight">
-        The <span className="text-gradient-cosmic">festival calendar</span> is our marketing calendar
+        {t("calendarPage.headingPlain")}<span className="text-gradient-cosmic">{t("calendarPage.headingHighlight")}</span>{t("calendarPage.headingSuffix")}
       </h1>
       <p className="mt-4 text-lg text-muted-foreground max-w-2xl">
-        Religious time already carries urgency, anticipation, and collective participation — so our launches align to it.
-        Staff-curated, updated month to month. For live sessions, webinars, and quizzes, see <Link to="/events" className="text-primary link-underline">Events</Link>.
+        {t("calendarPage.subtextPre")} <Link to="/events" className="text-primary link-underline">{t("nav.events")}</Link>.
       </p>
 
       {/* HAPPENING SOON — auto-expiring 30-day window */}
       <div className="mt-14 flex items-baseline gap-3 flex-wrap mb-6">
-        <h2 className="font-display text-3xl font-bold">Happening in the next 30 days</h2>
-        <span className="chip bg-accent/15 text-accent border border-accent/30">Auto-updates daily</span>
+        <h2 className="font-display text-3xl font-bold">{t("calendarPage.happeningSoon")}</h2>
+        <span className="chip bg-accent/15 text-accent border border-accent/30">{t("calendarPage.autoUpdates")}</span>
       </div>
       <div className="grid md:grid-cols-2 gap-5">
         {upcoming.map((f) => (
@@ -104,29 +106,29 @@ export default function Calendar() {
         ))}
         {upcoming.length === 0 && (
           <div className="md:col-span-2 rounded-2xl border border-dashed border-border p-10 text-center text-muted-foreground">
-            No festivals in the next 30 days — browse other months below.
+            {t("calendarPage.noUpcoming")}
           </div>
         )}
       </div>
 
       {/* BROWSE BY MONTH */}
       <div className="mt-16 flex items-center justify-between flex-wrap gap-4 mb-6">
-        <h2 className="font-display text-3xl font-bold">Browse by month</h2>
+        <h2 className="font-display text-3xl font-bold">{t("calendarPage.browseByMonth")}</h2>
         <div className="flex items-center gap-3 rounded-full border border-border bg-card px-2 py-1.5">
-          <button onClick={() => shiftMonth(-1)} aria-label="Previous month" data-testid="calendar-prev-month"
+          <button onClick={() => shiftMonth(-1)} aria-label={t("calendarPage.prevMonth")} data-testid="calendar-prev-month"
             className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center transition-colors">
             <ChevronLeft className="w-4 h-4" />
           </button>
           <span className="font-display font-semibold text-sm min-w-[140px] text-center tabular" data-testid="calendar-month-label">
             {cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
           </span>
-          <button onClick={() => shiftMonth(1)} aria-label="Next month" data-testid="calendar-next-month"
+          <button onClick={() => shiftMonth(1)} aria-label={t("calendarPage.nextMonth")} data-testid="calendar-next-month"
             className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center transition-colors">
             <ChevronRight className="w-4 h-4" />
           </button>
           {!isCurrentMonth && (
             <button onClick={() => { const d = todayStart(); d.setDate(1); setCursor(d); }}
-              className="text-xs text-primary link-underline ml-1 pr-2">Today</button>
+              className="text-xs text-primary link-underline ml-1 pr-2">{t("calendarPage.today")}</button>
           )}
         </div>
       </div>
@@ -136,7 +138,7 @@ export default function Calendar() {
         ))}
         {monthFestivals.length === 0 && (
           <div className="md:col-span-2 rounded-2xl border border-dashed border-border p-10 text-center text-muted-foreground">
-            No festivals recorded for {cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}.
+            {t("calendarPage.noneRecorded", { month: cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" }) })}
           </div>
         )}
       </div>

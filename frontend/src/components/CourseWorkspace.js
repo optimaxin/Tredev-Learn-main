@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,17 +8,21 @@ import { toast } from "sonner";
 import SadhanaCounter from "@/components/SadhanaCounter";
 import { CheckCircle2, Circle, PlayCircle, Award, ClipboardList, Radio, Video } from "lucide-react";
 
-const CERT_LABEL = {
-  requested: "Requested — awaiting staff approval",
-  pending_signature: "Approved — awaiting Ācharya's signature",
-  published: "Certificate issued",
-};
-const ASSESSMENT_LABEL = { submitted: "Submitted — awaiting staff review", graded: "Graded" };
+const certLabel = (t, status) => ({
+  requested: t("courseWorkspace.certRequested"),
+  pending_signature: t("courseWorkspace.certPendingSignature"),
+  published: t("courseWorkspace.certPublished"),
+}[status]);
+const assessmentLabel = (t, status) => ({
+  submitted: t("courseWorkspace.assessmentSubmitted"),
+  graded: t("courseWorkspace.assessmentGraded"),
+}[status]);
 
 /** The enrolled-learner view of a course: one lesson at a time (sidebar nav + player),
  * progress tracking, and the lessons → assessment → certificate gate. Self-contained so
  * it can be embedded anywhere (Learner Dashboard, public course page) without prop-drilling. */
 export default function CourseWorkspace({ offeringId }) {
+  const { t } = useTranslation();
   const [offering, setOffering] = useState(null);
   const [completed, setCompleted] = useState([]);
   const [myCert, setMyCert] = useState(null);
@@ -44,7 +49,8 @@ export default function CourseWorkspace({ offeringId }) {
       if (s) setSadhana(s.data);
     }
   };
-  useEffect(() => { load(); setActiveIdx(0); /* eslint-disable-next-line */ }, [offeringId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); setActiveIdx(0); }, [offeringId]);
 
   useEffect(() => {
     if (!offering) return;
@@ -71,7 +77,7 @@ export default function CourseWorkspace({ offeringId }) {
     try {
       const { data } = await api.post("/certificates/request", { offering_id: offeringId });
       setMyCert(data);
-      toast.success("Certificate requested — the academic team will review it.");
+      toast.success(t("courseWorkspace.certRequestedToast"));
     } catch (e) { toast.error(formatApiError(e)); }
     setRequesting(false);
   };
@@ -85,7 +91,7 @@ export default function CourseWorkspace({ offeringId }) {
     setJoiningId(null);
   };
 
-  if (!offering) return <div className="p-10 text-center text-muted-foreground text-sm">Loading…</div>;
+  if (!offering) return <div className="p-10 text-center text-muted-foreground text-sm">{t("common.loading")}</div>;
 
   const modules = offering.modules || [];
   const totalLessons = modules.length;
@@ -103,7 +109,7 @@ export default function CourseWorkspace({ offeringId }) {
       )}
 
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-medium text-muted-foreground">{completed.length}/{totalLessons} lessons complete</div>
+        <div className="text-sm font-medium text-muted-foreground">{completed.length}/{totalLessons} {t("courseWorkspace.lessonsComplete")}</div>
         <div className="text-sm font-semibold tabular">{pct}%</div>
       </div>
       <div className="h-2 rounded-full bg-muted overflow-hidden mb-8" data-testid="course-progress">
@@ -115,21 +121,21 @@ export default function CourseWorkspace({ offeringId }) {
         <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-center gap-4 flex-wrap" data-testid="cert-cta">
           <Award className="w-6 h-6 text-primary shrink-0" />
           <div className="flex-1 min-w-[220px]">
-            <div className="font-display font-semibold">You've completed every lesson 🎉</div>
+            <div className="font-display font-semibold">{t("courseWorkspace.allLessonsDone")}</div>
             <div className="text-sm text-muted-foreground">
               {myCert
-                ? CERT_LABEL[myCert.signature_status] || "In progress"
-                : (assessment && !attemptStatus ? "Complete the course assessment first." : "Request your Ācharya-signed certificate.")}
+                ? certLabel(t, myCert.signature_status) || t("courseWorkspace.inProgress")
+                : (assessment && !attemptStatus ? t("courseWorkspace.completeAssessmentFirst") : t("courseWorkspace.requestCertNote"))}
             </div>
           </div>
           {!myCert && (
             <Button onClick={requestCertificate} disabled={requesting || (assessment && !attemptStatus)}
               className="rounded-full bg-gradient-hot text-white border-0" data-testid="request-cert">
-              {requesting ? "Requesting…" : "Request certificate"}
+              {requesting ? t("courseWorkspace.requesting") : t("courseWorkspace.requestCert")}
             </Button>
           )}
           {myCert && myCert.signature_status === "published" && (
-            <Link to="/certificates"><Button className="rounded-full bg-gradient-hot text-white border-0">View certificate</Button></Link>
+            <Link to="/certificates"><Button className="rounded-full bg-gradient-hot text-white border-0">{t("courseWorkspace.viewCert")}</Button></Link>
           )}
           {myCert && myCert.signature_status !== "published" && (
             <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{myCert.signature_status.replace("_", " ")}</Badge>
@@ -142,23 +148,23 @@ export default function CourseWorkspace({ offeringId }) {
         <div className="mb-8 rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-center gap-4 flex-wrap" data-testid="assessment-cta">
           <ClipboardList className="w-6 h-6 text-primary shrink-0" />
           <div className="flex-1 min-w-[220px]">
-            <div className="font-display font-semibold">Course assessment</div>
+            <div className="font-display font-semibold">{t("courseWorkspace.assessmentHeading")}</div>
             <div className="text-sm text-muted-foreground">
               {attemptStatus
                 ? (attemptStatus.status === "graded"
-                  ? `${ASSESSMENT_LABEL.graded} — score ${attemptStatus.score}/${attemptStatus.total_score}`
-                  : ASSESSMENT_LABEL[attemptStatus.status] || "In progress")
-                : "Test your understanding to complete this course."}
+                  ? `${assessmentLabel(t, "graded")} — ${t("courseWorkspace.score", { score: attemptStatus.score, total: attemptStatus.total_score })}`
+                  : assessmentLabel(t, attemptStatus.status) || t("courseWorkspace.inProgress"))
+                : t("courseWorkspace.testYourUnderstanding")}
             </div>
           </div>
           {!attemptStatus && (
             <Link to={`/quiz/${assessment.id}`}>
-              <Button className="rounded-full bg-gradient-hot text-white border-0" data-testid="start-assessment">Start assessment</Button>
+              <Button className="rounded-full bg-gradient-hot text-white border-0" data-testid="start-assessment">{t("courseWorkspace.startAssessment")}</Button>
             </Link>
           )}
           {attemptStatus && (
             <Badge variant="outline" className="text-[10px] uppercase tracking-widest">
-              {attemptStatus.status === "graded" ? `Score ${attemptStatus.score}/${attemptStatus.total_score}` : "Pending review"}
+              {attemptStatus.status === "graded" ? t("courseWorkspace.score", { score: attemptStatus.score, total: attemptStatus.total_score }) : t("courseWorkspace.pendingReview")}
             </Badge>
           )}
         </div>
@@ -167,7 +173,7 @@ export default function CourseWorkspace({ offeringId }) {
       {/* Live sessions scheduled for this specific course */}
       {sessions.length > 0 && (
         <div className="mb-8 space-y-3" data-testid="course-live-sessions">
-          <div className="eyebrow">Live sessions for this course</div>
+          <div className="eyebrow">{t("courseWorkspace.liveSessionsHeading")}</div>
           {sessions.map((s) => (
             <div key={s.id} className="rounded-xl border border-border p-4 bg-card flex items-center gap-4 flex-wrap" data-testid={`course-session-${s.id}`}>
               <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center text-primary shrink-0">
@@ -175,14 +181,14 @@ export default function CourseWorkspace({ offeringId }) {
               </div>
               <div className="flex-1 min-w-[180px]">
                 <div className="font-display font-semibold">{s.title}</div>
-                <div className="text-xs text-muted-foreground tabular">{new Date(s.starts_at).toLocaleString()} · {s.duration_min} min</div>
+                <div className="text-xs text-muted-foreground tabular">{new Date(s.starts_at).toLocaleString()} · {s.duration_min} {t("courseWorkspace.min")}</div>
               </div>
               {s.can_join ? (
                 <Button size="sm" onClick={() => joinSession(s)} disabled={joiningId === s.id} className="rounded-full bg-gradient-hot text-white border-0">
-                  {joiningId === s.id ? "Joining…" : "Join now"}
+                  {joiningId === s.id ? t("courseWorkspace.joining") : t("courseWorkspace.joinNow")}
                 </Button>
               ) : (
-                <Badge variant="outline" className="text-[10px] uppercase tracking-widest">Opens 5 min before</Badge>
+                <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{t("courseWorkspace.opensSoon")}</Badge>
               )}
             </div>
           ))}
@@ -192,7 +198,7 @@ export default function CourseWorkspace({ offeringId }) {
       {totalLessons === 0 ? (
         <div className="rounded-xl border border-border bg-card p-10 text-center">
           <PlayCircle className="w-8 h-8 mx-auto text-primary/60 mb-3" />
-          <p className="text-sm text-muted-foreground">Curriculum coming soon.</p>
+          <p className="text-sm text-muted-foreground">{t("courseWorkspace.curriculumSoon")}</p>
         </div>
       ) : (
         <div className="grid lg:grid-cols-[280px_1fr] gap-8">
@@ -209,7 +215,7 @@ export default function CourseWorkspace({ offeringId }) {
                   {isDone
                     ? <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
                     : <Circle className="w-4 h-4 text-muted-foreground shrink-0" />}
-                  <span className="flex-1 leading-snug">{i + 1}. {m.title || "Untitled lesson"}</span>
+                  <span className="flex-1 leading-snug">{i + 1}. {m.title || t("courseWorkspace.untitledLesson")}</span>
                 </button>
               );
             })}
@@ -217,12 +223,12 @@ export default function CourseWorkspace({ offeringId }) {
 
           {/* Player — the currently selected lesson only */}
           <div data-testid="lesson-player">
-            <div className="text-2xl font-serif mb-4">{active.title || "Untitled lesson"}</div>
+            <div className="text-2xl font-serif mb-4">{active.title || t("courseWorkspace.untitledLesson")}</div>
             {active.video_url ? (
               <video key={activeId} src={active.video_url} controls className="w-full rounded-xl border border-border bg-black aspect-video" />
             ) : (
               <div className="w-full rounded-xl border border-dashed border-border aspect-video flex items-center justify-center text-muted-foreground text-sm">
-                No video for this lesson.
+                {t("courseWorkspace.noVideo")}
               </div>
             )}
             {active.body && (
@@ -231,16 +237,16 @@ export default function CourseWorkspace({ offeringId }) {
             <div className="mt-6 flex items-center justify-between flex-wrap gap-3">
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" disabled={activeIdx === 0} onClick={() => setActiveIdx((i) => i - 1)} className="rounded-full">
-                  ← Previous
+                  ← {t("courseWorkspace.previous")}
                 </Button>
                 <Button size="sm" variant="outline" disabled={activeIdx === totalLessons - 1} onClick={() => setActiveIdx((i) => i + 1)} className="rounded-full">
-                  Next →
+                  {t("courseWorkspace.next")} →
                 </Button>
               </div>
               <Button size="sm" variant={activeDone ? "default" : "outline"} onClick={() => toggleLesson(activeId)}
                 data-testid="lesson-complete-toggle"
                 className={`rounded-full ${activeDone ? "bg-primary text-primary-foreground border-0" : ""}`}>
-                {activeDone ? <><Award className="w-4 h-4 mr-1" />Completed</> : "Mark complete"}
+                {activeDone ? <><Award className="w-4 h-4 mr-1" />{t("courseWorkspace.completed")}</> : t("courseWorkspace.markComplete")}
               </Button>
             </div>
           </div>

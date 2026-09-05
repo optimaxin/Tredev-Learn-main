@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import QueryTicketList from "@/components/queries/QueryTicketList";
@@ -10,6 +11,7 @@ const MSG_POLL_MS = 4000;
 
 /** User Portal — "Queries" tab. Dual-panel master-detail, GUVI/Zen Class style. */
 export default function QueriesUser() {
+  const { t } = useTranslation();
   const [tickets, setTickets] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -24,7 +26,7 @@ export default function QueriesUser() {
       const { data } = await api.get("/queries/mine");
       setTickets(data);
       if (selectedIdRef.current) {
-        const fresh = data.find((t) => t.id === selectedIdRef.current);
+        const fresh = data.find((tk) => tk.id === selectedIdRef.current);
         if (fresh) setSelected(fresh);
       }
     } catch { /* keep last known list on a transient poll failure */ }
@@ -50,6 +52,7 @@ export default function QueriesUser() {
     loadMessages(selected.id);
     const id = setInterval(() => loadMessages(selected.id), MSG_POLL_MS);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, loadMessages]);
 
   const handleCreated = (ticket) => {
@@ -73,7 +76,7 @@ export default function QueriesUser() {
     setClosing(true);
     try {
       await api.post(`/queries/${selected.id}/close`);
-      toast.success("Query closed.");
+      toast.success(t("queriesUser.closed"));
       await loadMessages(selected.id);
       await loadTickets();
     } catch (e) { toast.error(formatApiError(e)); }
@@ -86,7 +89,7 @@ export default function QueriesUser() {
         tickets={tickets} selectedId={selected?.id} onSelect={setSelected}
         search={search} onSearchChange={setSearch} mode="user" loading={loadingList}
         createAction={<CreateQueryDialog onCreated={handleCreated} />}
-        emptyLabel="You haven't raised any queries yet." testidPrefix="user-query"
+        emptyLabel={t("queriesUser.empty")} testidPrefix="user-query"
       />
       <QueryChatThread
         ticket={selected} messages={messages} mode="user"

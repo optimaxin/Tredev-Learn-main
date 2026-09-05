@@ -18,6 +18,26 @@ IST = timezone(timedelta(hours=5, minutes=30))
 MONTHS = ["Chaitra", "Vaisakha", "Jyeshtha", "Ashadha", "Shravana", "Bhadrapada",
           "Ashwina", "Kartika", "Margashirsha", "Pausha", "Magha", "Phalguna"]
 
+NAKSHATRAS = ["Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra", "Punarvasu", "Pushya",
+              "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni", "Hasta", "Chitra", "Swati", "Vishakha",
+              "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha", "Uttara Ashadha", "Shravana", "Dhanishta",
+              "Shatabhisha", "Purva Bhadrapada", "Uttara Bhadrapada", "Revati"]
+
+TITHI_NAMES = ["Pratipada", "Dwitiya", "Tritiya", "Chaturthi", "Panchami", "Shashthi", "Saptami",
+               "Ashtami", "Navami", "Dashami", "Ekadashi", "Dwadashi", "Trayodashi", "Chaturdashi"]
+
+YOGAS = ["Vishkambha", "Priti", "Ayushman", "Saubhagya", "Shobhana", "Atiganda", "Sukarma", "Dhriti",
+         "Shula", "Ganda", "Vriddhi", "Dhruva", "Vyaghata", "Harshana", "Vajra", "Siddhi", "Vyatipata",
+         "Variyana", "Parigha", "Shiva", "Siddha", "Sadhya", "Shubha", "Shukla", "Brahma", "Indra", "Vaidhriti"]
+
+MOVABLE_KARANAS = ["Bava", "Balava", "Kaulava", "Taitila", "Gara", "Vanija", "Vishti"]
+FIXED_KARANAS_TAIL = ["Shakuni", "Chatushpada", "Naga"]
+
+VARAS = ["Ravivar", "Somavar", "Mangalvar", "Budhavar", "Guruvar", "Shukravar", "Shanivar"]
+
+# 1-indexed 1/8th day-segment assigned to Rahu Kalam, by weekday (Sun..Sat)
+RAHU_SEGMENT = [8, 2, 7, 5, 6, 4, 3]
+
 
 def _jd(dt_utc):
     return swe.julday(dt_utc.year, dt_utc.month, dt_utc.day,
@@ -77,15 +97,105 @@ def _new_moon_after(jd):
 
 def _sunrise(d):
     """Sunrise JD (UT) at Ujjain for civil date d (a datetime.date)."""
+    return _rise_set(d, UJJAIN_LAT, UJJAIN_LON, swe.SUN, True) or swe.julday(
+        d.year, d.month, d.day, 0.5)  # ~06:00 IST fallback
+
+
+def _rise_set(d, lat, lon, body, rise):
+    """Rise/set JD (UT) of `body` at (lat, lon) for civil date d, or None if it fails.
+
+    Search starts at d's local mean midnight (longitude-based, not a fixed UT
+    offset) so the event found is the one belonging to civil day d. A fixed
+    "12 hours before UT midnight" start works for the Sun (which drifts by
+    seconds/day) but not the Moon, which rises ~50 min later each day: near
+    full moon that fixed window can still contain the *previous* day's
+    moonrise, silently returning it instead of today's (was off by ~30min).
+    Rise/set use the upper-limb + standard-refraction convention (swisseph's
+    default), matching civil sunrise/moonrise as shown by reference Panchang
+    sites — not the disc-center crossing.
+    """
     jd0 = swe.julday(d.year, d.month, d.day, 0.0)
+    start = jd0 - (lon / 15.0) / 24.0
+    flag = swe.CALC_RISE if rise else swe.CALC_SET
     try:
-        res = swe.rise_trans(jd0 - 0.5, swe.SUN,
-                             swe.CALC_RISE | swe.BIT_DISC_CENTER,
-                             (UJJAIN_LON, UJJAIN_LAT, 0))
+        res = swe.rise_trans(start, body, flag, (lon, lat, 0))
         return res[1][0]
     except Exception:
-        # ~06:00 IST fallback
-        return swe.julday(d.year, d.month, d.day, 0.5)
+        return None
+
+
+def _fmt_ist(jd):
+    if jd is None:
+        return "—"
+    return _dt_from_jd(jd).astimezone(IST).strftime("%H:%M")
+
+
+def _karana_for_half_tithi(idx):
+    """idx: 0..59. Kimstughna at 0, 7 movable karanas cycle 8x for 1-56, then
+    Shakuni/Chatushpada/Naga close out 57-59."""
+    if idx == 0:
+        return "Kimstughna"
+    if idx >= 57:
+        return FIXED_KARANAS_TAIL[idx - 57]
+    return MOVABLE_KARANAS[(idx - 1) % 7]
+
+
+def daily_panchang(target_date, lat, lon):
+    """Panchang for a civil date at (lat, lon), evaluated at local sunrise —
+    the standard convention used by reference Panchang sites."""
+    sunrise_jd = _rise_set(target_date, lat, lon, swe.SUN, True)
+    sunset_jd = _rise_set(target_date, lat, lon, swe.SUN, False)
+    moonrise_jd = _rise_set(target_date, lat, lon, swe.MOON, True)
+    moonset_jd = _rise_set(target_date, lat, lon, swe.MOON, False)
+
+    ref_jd = sunrise_jd if sunrise_jd is not None else swe.julday(
+        target_date.year, target_date.month, target_date.day, 0.5)
+
+    tithi_num = tithi_at(ref_jd)  # 1..30
+    paksha = "Shukla" if tithi_num <= 15 else "Krishna"
+    if tithi_num == 15:
+        tithi_name = "Purnima"
+    elif tithi_num == 30:
+        tithi_name = "Amavasya"
+    else:
+        tithi_name = TITHI_NAMES[(tithi_num - 1) % 15]
+
+    moon_sidereal = swe.calc_ut(ref_jd, swe.MOON, swe.FLG_SIDEREAL)[0][0] % 360.0
+    sun_sidereal = swe.calc_ut(ref_jd, swe.SUN, swe.FLG_SIDEREAL)[0][0] % 360.0
+    nakshatra_name = NAKSHATRAS[int(moon_sidereal // (360.0 / 27)) % 27]
+    yoga_name = YOGAS[int((sun_sidereal + moon_sidereal) % 360.0 // (360.0 / 27)) % 27]
+    karana_name = _karana_for_half_tithi(int(_elong(ref_jd) // 6))
+
+    vara = VARAS[(target_date.weekday() + 1) % 7]
+
+    rahu_kalam = None
+    abhijit_muhurta = None
+    if sunrise_jd is not None and sunset_jd is not None:
+        eighth = (sunset_jd - sunrise_jd) / 8
+        segment = RAHU_SEGMENT[(target_date.weekday() + 1) % 7]
+        rahu_start = sunrise_jd + (segment - 1) * eighth
+        rahu_kalam = f"{_fmt_ist(rahu_start)} – {_fmt_ist(rahu_start + eighth)}"
+
+        noon = (sunrise_jd + sunset_jd) / 2
+        abhijit_muhurta = f"{_fmt_ist(noon - 24 / 1440)} – {_fmt_ist(noon + 24 / 1440)}"
+
+    return {
+        "date": target_date.isoformat(),
+        "vara": vara,
+        "paksha": paksha,
+        "tithi": tithi_name,
+        "nakshatra": nakshatra_name,
+        "yoga": yoga_name,
+        "karana": karana_name,
+        "sunrise": _fmt_ist(sunrise_jd),
+        "sunset": _fmt_ist(sunset_jd),
+        "moonrise": _fmt_ist(moonrise_jd),
+        "moonset": _fmt_ist(moonset_jd),
+        "rahu_kalam": rahu_kalam,
+        "abhijit_muhurta": abhijit_muhurta,
+        "note": "Computed via Swiss Ephemeris with Lahiri ayanamsa, evaluated at sunrise — "
+                "matches the convention used by standard Panchang references.",
+    }
 
 
 def _amanta_month_index(nm_jd):
@@ -207,3 +317,15 @@ def upcoming_festivals(from_date=None, count=12):
                 break
     out.sort(key=lambda x: x["date"])
     return out[:count]
+
+
+if __name__ == "__main__":
+    r = daily_panchang(date.today(), UJJAIN_LAT, UJJAIN_LON)
+    assert r["tithi"] in TITHI_NAMES + ["Purnima", "Amavasya"], r["tithi"]
+    assert r["nakshatra"] in NAKSHATRAS, r["nakshatra"]
+    assert r["yoga"] in YOGAS, r["yoga"]
+    assert r["karana"] in MOVABLE_KARANAS + FIXED_KARANAS_TAIL + ["Kimstughna"], r["karana"]
+    assert r["vara"] in VARAS, r["vara"]
+    assert r["sunrise"] != "—" and r["sunset"] != "—", r
+    assert r["sunrise"] < r["sunset"], r  # sunset must follow sunrise same day
+    print(r)

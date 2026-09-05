@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
+import { localized } from "@/lib/utils";
 
 const CATEGORIES = ["all", "gita", "palmistry", "tarot", "vastu", "panchang"];
 
 export default function Blog() {
+  const { i18n } = useTranslation();
+  const lang = i18n.resolvedLanguage || i18n.language || "en";
   const [posts, setPosts] = useState([]);
   const [cat, setCat] = useState("all");
 
@@ -42,8 +46,8 @@ export default function Blog() {
               <span className="absolute top-3 left-3 chip bg-white/95 text-black uppercase text-[10px]">{b.category}</span>
             </div>
             <div className="p-6 flex-1">
-              <h2 className={`font-display font-bold leading-tight ${i === 0 ? "text-2xl md:text-3xl" : "text-xl"}`}>{b.title}</h2>
-              <p className="mt-3 text-sm text-muted-foreground line-clamp-3 leading-relaxed">{b.excerpt}</p>
+              <h2 className={`font-display font-bold leading-tight ${i === 0 ? "text-2xl md:text-3xl" : "text-xl"}`}>{localized(b, "title", lang)}</h2>
+              <p className="mt-3 text-sm text-muted-foreground line-clamp-3 leading-relaxed">{localized(b, "excerpt", lang)}</p>
               <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                 <span>{b.author_name}</span><span>·</span><span>{b.read_time}</span>
               </div>

@@ -79,12 +79,17 @@ module.exports = {
       },
       keyframes: {
         "fade-in-up": { "0%": { opacity: 0, transform: "translateY(14px)" }, "100%": { opacity: 1, transform: "translateY(0)" } },
+        "fade-in": { "0%": { opacity: 0 }, "100%": { opacity: 1 } },
         "float": { "0%,100%": { transform: "translateY(0)" }, "50%": { transform: "translateY(-10px)" } },
         "glow": { "0%,100%": { boxShadow: "0 0 0 rgba(201,154,46,0)" }, "50%": { boxShadow: "0 0 24px rgba(201,154,46,0.45)" } },
         "shimmer": { "100%": { transform: "translateX(100%)" } },
       },
       animation: {
         "fade-in-up": "fade-in-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both",
+        /* Opacity-only — safe to combine with an element's own inline `transform`
+           (e.g. a fanned card's rotate/translate); fade-in-up's transform keyframe
+           would silently clobber it once the animation settles. */
+        "fade-in": "fade-in 0.5s ease-out both",
         "float": "float 6s ease-in-out infinite",
         "glow": "glow 2.4s ease-in-out infinite",
         "shimmer": "shimmer 2s linear infinite",

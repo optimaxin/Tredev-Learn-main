@@ -80,6 +80,18 @@ agenthub/agents/youtube/db
 
 memory/test_credentials.md
 
+# Ruflo / claude-flow tool state — internal daemon/metrics/memory, not project source
+.claude-flow/
+**/.claude-flow/
+.swarm/
+**/.swarm/
+ruvector.db
+
+# Internal working docs — not meant to ship with the deployed app
+/docs/
+test_reports/
+test_result.md
+
 # Mobile development
 android-sdk/
 .env
