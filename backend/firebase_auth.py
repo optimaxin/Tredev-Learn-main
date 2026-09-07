@@ -17,6 +17,8 @@ Env:
   FIREBASE_WEB_API_KEY   Web API key (Firebase console → Project settings)
 """
 import asyncio
+import base64
+import json
 import os
 
 import requests
@@ -93,7 +95,25 @@ async def verify_id_token(token: str) -> dict:
     if not users:
         raise AuthError(401, "Invalid token")
     u = users[0]
-    return {"uid": u.get("localId"), "email": u.get("email")}
+    return {"uid": u.get("localId"), "email": u.get("email"),
+            "name": u.get("displayName", ""), "picture": u.get("photoUrl", "")}
+
+
+def token_issued_at(token: str) -> int:
+    """Read the unverified `iat` claim out of an ID token's payload.
+
+    Safe to trust without re-verifying the signature here: this is only ever
+    called right after verify_id_token() succeeded, meaning Firebase's
+    accounts:lookup already validated the token's signature and expiry.
+    Returns 0 (never later than any force_logout_at) if the token is malformed.
+    """
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return int(claims.get("iat", 0))
+    except Exception:
+        return 0
 
 
 async def sign_up(email: str, password: str):
@@ -103,6 +123,14 @@ async def sign_up(email: str, password: str):
         {"email": email, "password": password, "returnSecureToken": True},
     )
     return data["localId"], data["idToken"]
+
+
+async def send_password_reset(email: str):
+    """Trigger Firebase's password-reset email via the same REST surface as
+    sign-up/sign-in (no Admin SDK needed)."""
+    await asyncio.to_thread(
+        _rest, "sendOobCode", {"requestType": "PASSWORD_RESET", "email": email},
+    )
 
 
 async def sign_in(email: str, password: str):

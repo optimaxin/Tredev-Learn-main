@@ -30,6 +30,7 @@ COLUMNS = {
         "id": "uuid", "firebase_uid": "text", "email": "text", "name": "text",
         "role": "text", "avatar_url": "text", "bio": "text", "parampara": "text",
         "created_at": "text",
+        "suspended": "bool", "is_deleted": "bool", "force_logout_at": "text",
     },
     "verses": {
         "id": "uuid", "scripture": "text", "reference": "text", "devanagari": "text",
@@ -45,10 +46,13 @@ COLUMNS = {
         "approved_by_acharya": "bool", "approval_notes": "text", "approved_at": "text",
         "title_hi": "text", "subtitle_hi": "text", "description_hi": "text",
         "bunny_collection_id": "text",
+        "is_popular": "bool", "is_recommended": "bool", "is_verified": "bool",
+        "is_archived": "bool",
     },
     "enrollments": {
         "id": "uuid", "user_id": "uuid", "offering_id": "uuid", "enrolled_at": "text",
         "progress": "int", "completed_lessons": "jsonb", "status": "text",
+        "source": "text", "granted_by": "uuid", "batch_id": "uuid",
     },
     "sadhana_progress": {
         "id": "uuid", "user_id": "uuid", "offering_id": "uuid", "sankalpa": "text",
@@ -90,7 +94,16 @@ COLUMNS = {
         "id": "uuid", "title": "text", "offering_id": "uuid", "acharya_id": "uuid",
         "starts_at": "text", "duration_min": "int", "mode": "text", "acharya_name": "text",
         "created_at": "text", "created_by": "uuid", "join_url": "text", "topic": "text",
-        "kind": "text", "quiz_id": "uuid", "thumbnail_url": "text",
+        "kind": "text", "quiz_id": "uuid", "thumbnail_url": "text", "recording_url": "text",
+        "batch_id": "uuid",
+    },
+    "batches": {
+        "id": "uuid", "offering_id": "uuid", "name": "text", "start_date": "text",
+        "max_students": "int", "created_at": "text", "created_by": "uuid",
+    },
+    "lesson_comments": {
+        "id": "uuid", "offering_id": "uuid", "lesson_id": "text", "body": "text",
+        "author_id": "uuid", "author_name": "text", "created_at": "text",
     },
     "certificates": {
         "id": "uuid", "code": "text", "user_id": "uuid", "user_name": "text",
@@ -110,7 +123,8 @@ COLUMNS = {
     "payments": {
         "id": "uuid", "order_id": "text", "user_id": "uuid", "offering_id": "uuid",
         "amount_inr": "int", "status": "text", "created_at": "text", "mocked": "bool",
-        "paid_at": "text",
+        "paid_at": "text", "gateway": "text", "cf_order_id": "text", "currency": "text",
+        "signature_verified": "bool", "batch_id": "uuid",
     },
     "festivals": {
         "id": "uuid", "name": "text", "date": "text", "significance": "text",
@@ -156,6 +170,14 @@ COLUMNS = {
         "id": "uuid", "user_id": "uuid", "assigned_staff_id": "uuid",
         "title": "text", "description": "text", "category_tags": "jsonb",
         "status": "text", "created_at": "text", "updated_at": "text",
+        "escalated": "bool", "escalated_at": "text", "escalated_by": "uuid",
+        "escalation_note": "text",
+    },
+    "coupons": {
+        "id": "uuid", "code": "text", "discount_type": "text", "discount_value": "int",
+        "offering_id": "uuid", "max_uses": "int", "used_count": "int",
+        "valid_from": "text", "valid_until": "text", "active": "bool",
+        "is_special": "bool", "created_by": "uuid", "created_at": "text",
     },
     "query_messages": {
         "id": "uuid", "ticket_id": "uuid", "sender_id": "uuid", "sender_role": "text",

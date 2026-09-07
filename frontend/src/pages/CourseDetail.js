@@ -1,29 +1,42 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import ShlokaPlayer from "@/components/ShlokaPlayer";
-import { BookOpen, Award, GraduationCap } from "lucide-react";
+import { BookOpen, Award, GraduationCap, Users, CalendarDays } from "lucide-react";
 import { localized } from "@/lib/utils";
+import { useCurrency, formatPrice } from "@/context/CurrencyContext";
 
 export default function CourseDetail() {
   const { t, i18n } = useTranslation();
   const lang = i18n.resolvedLanguage || i18n.language || "en";
   const { id } = useParams();
   const { user } = useAuth();
+  const { currency } = useCurrency();
   const nav = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [offering, setOffering] = useState(null);
   const [selectedVerseIdx, setSelectedVerseIdx] = useState(0);
   const [enrolling, setEnrolling] = useState(false);
   const [enrolled, setEnrolled] = useState(false);
+  const [couponCode, setCouponCode] = useState("");
+  const [batches, setBatches] = useState([]);
+  const [selectedBatchId, setSelectedBatchId] = useState("");
 
   const load = async () => {
     const { data } = await api.get(`/offerings/${id}`);
     setOffering(data);
+    if (data.type === "live_course") {
+      const { data: b } = await api.get("/batches", { params: { offering_id: id } }).catch(() => ({ data: [] }));
+      const list = Array.isArray(b) ? b : [];
+      setBatches(list);
+      setSelectedBatchId((prev) => prev || list.find((x) => (x.seats_available ?? 0) > 0)?.id || "");
+    }
     if (user) {
       try {
         const my = await api.get("/enrollments/mine");
@@ -35,18 +48,48 @@ export default function CourseDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [id, user?.id]);
 
+  // Cashfree redirects back here as /courses/:id?order_id=... after checkout —
+  // reconcile via the status endpoint rather than trusting the redirect alone.
+  useEffect(() => {
+    const orderId = searchParams.get("order_id");
+    if (!orderId || !user) return;
+    api.get(`/payments/${orderId}/status`).then(({ data }) => {
+      if (data.status === "paid") {
+        toast.success(t("courseDetail.enrolledToast"));
+        setEnrolled(true);
+        load();
+      } else if (data.status === "failed") {
+        toast.error(t("courseDetail.paymentFailed"));
+      } else {
+        toast.info(t("courseDetail.paymentPending"));
+      }
+    }).catch(() => {}).finally(() => {
+      searchParams.delete("order_id");
+      setSearchParams(searchParams, { replace: true });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const isLiveCourse = offering?.type === "live_course";
+  const hasOpenBatch = batches.some((b) => (b.seats_available ?? 0) > 0);
+
   const enroll = async () => {
     if (!user) return nav("/login", { state: { from: `/courses/${id}` } });
+    if (isLiveCourse && !selectedBatchId) return toast.error(t("courseDetail.selectBatchFirst"));
     setEnrolling(true);
     try {
       if (offering.price_inr > 0) {
-        // MOCKED Razorpay flow
-        const { data } = await api.post("/payments/create-order", { offering_id: id });
-        toast.info(t("courseDetail.mockedPayment", { orderId: data.order_id }));
-        await api.post("/payments/webhook-mock", { order_id: data.order_id });
-      } else {
-        await api.post("/enrollments", { offering_id: id });
+        const { data } = await api.post("/payments/cashfree/create-order", {
+          offering_id: id, coupon_code: couponCode.trim() || undefined,
+          batch_id: isLiveCourse ? selectedBatchId : undefined,
+        });
+        // ponytail: "sandbox" hardcoded for the test phase — switch to
+        // "production" here alongside flipping CASHFREE_ENV on the backend.
+        const cashfree = window.Cashfree({ mode: "sandbox" });
+        cashfree.checkout({ paymentSessionId: data.payment_session_id, redirectTarget: "_self" });
+        return; // browser navigates away to checkout; nothing left to do here
       }
+      await api.post("/enrollments", { offering_id: id, batch_id: isLiveCourse ? selectedBatchId : undefined });
       toast.success(t("courseDetail.enrolledToast"));
       setEnrolled(true);
       load();
@@ -57,6 +100,8 @@ export default function CourseDetail() {
   if (!offering) return <div className="p-20 text-center text-muted-foreground">{t("common.loading")}</div>;
 
   const verses = offering.verses_full || [];
+  const price = currency === "USD" ? offering.price_usd : offering.price_inr;
+  const lessonCount = Array.isArray(offering.modules) ? offering.modules.length : 0;
 
   return (
     <div>
@@ -83,20 +128,65 @@ export default function CourseDetail() {
               {enrolled ? (
                 <Button size="lg" variant="outline" disabled className="rounded-full px-8 h-12" data-testid="enroll-status">{t("courseDetail.enrolledBtn")}</Button>
               ) : (
-                <Button size="lg" onClick={enroll} disabled={enrolling} data-testid="enroll-btn" className="rounded-full px-8 h-12">
-                  {enrolling ? t("courseDetail.enrolling") : (offering.price_inr === 0 ? t("courseDetail.enrollFree") : t("courseDetail.enrollPrice", { price: offering.price_inr.toLocaleString() }))}
+                <Button size="lg" onClick={enroll} disabled={enrolling || (isLiveCourse && !hasOpenBatch)} data-testid="enroll-btn" className="rounded-full px-8 h-12">
+                  {enrolling ? t("courseDetail.enrolling") : (!price ? t("courseDetail.enrollFree") : t("courseDetail.enrollPrice", { price: formatPrice(offering, currency) }))}
                 </Button>
               )}
               <div className="text-sm text-muted-foreground">
                 <BookOpen className="w-4 h-4 inline mr-1" /> {offering.duration}
               </div>
+              {!isLiveCourse && lessonCount > 0 && (
+                <div className="text-sm text-muted-foreground">{lessonCount} lesson{lessonCount === 1 ? "" : "s"}</div>
+              )}
               {offering.acharya && (
                 <Link to="#acharya" className="text-sm link-underline">
                   {t("courseDetail.taughtBy")} <span className="text-primary">{offering.acharya.name}</span>
                 </Link>
               )}
             </div>
-            {offering.price_inr > 0 && (
+
+            {isLiveCourse && !enrolled && (
+              <div className="mt-6 max-w-md" data-testid="batch-picker">
+                <div className="eyebrow mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> {t("courseDetail.chooseBatch")}</div>
+                {batches.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("courseDetail.noSeatsAvailable")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {batches.map((b) => {
+                      const seatsLeft = b.seats_available ?? 0;
+                      const full = seatsLeft <= 0;
+                      const active = selectedBatchId === b.id;
+                      return (
+                        <button key={b.id} type="button" disabled={full}
+                          onClick={() => setSelectedBatchId(b.id)}
+                          data-testid={`batch-option-${b.id}`}
+                          className={`w-full text-left rounded-xl border p-3 flex items-center justify-between gap-3 transition-colors ${
+                            full ? "border-border bg-muted/40 opacity-60 cursor-not-allowed" :
+                            active ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
+                          }`}>
+                          <div>
+                            <div className="font-medium text-sm">{b.name}</div>
+                            <div className="text-xs text-muted-foreground flex items-center gap-1"><CalendarDays className="w-3 h-3" /> {t("courseDetail.batchStarts", { date: b.start_date })}</div>
+                          </div>
+                          <Badge variant={full ? "outline" : active ? "default" : "outline"} className="text-[10px] uppercase tracking-widest shrink-0">
+                            {full ? t("courseDetail.batchFull") : t("courseDetail.batchSeatsLeft", { count: seatsLeft })}
+                          </Badge>
+                        </button>
+                      );
+                    })}
+                    {!hasOpenBatch && <p className="text-xs text-destructive mt-1">{t("courseDetail.noSeatsAvailable")}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+            {price > 0 && !enrolled && (
+              <div className="mt-4 flex items-center gap-2 max-w-xs">
+                <span className="text-xs text-muted-foreground shrink-0">{t("courseDetail.haveCoupon")}</span>
+                <Input value={couponCode} onChange={(e) => setCouponCode(e.target.value)}
+                  placeholder={t("courseDetail.couponPlaceholder")} className="h-8 text-xs" data-testid="coupon-code-input" />
+              </div>
+            )}
+            {price > 0 && (
               <div className="mt-4 text-xs text-muted-foreground">{t("courseDetail.mockedNotice")}</div>
             )}
           </div>

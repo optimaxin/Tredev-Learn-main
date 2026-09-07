@@ -4,10 +4,13 @@ import { useTranslation } from "react-i18next";
 import { Clock, ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { localized } from "@/lib/utils";
+import { useCurrency, formatPrice } from "@/context/CurrencyContext";
 
 export default function CourseCard({ course: o }) {
   const { i18n } = useTranslation();
   const lang = i18n.resolvedLanguage || i18n.language || "en";
+  const { currency } = useCurrency();
+  const price = currency === "USD" ? o.price_usd : o.price_inr;
   return (
     <Link to={`/courses/${o.id}`} data-testid={`course-card-${o.id}`}
       className="group flex flex-col rounded-2xl overflow-hidden border border-border bg-card card-elevated">
@@ -38,8 +41,8 @@ export default function CourseCard({ course: o }) {
         <div className="mt-auto pt-5">
           <div className="flex items-center justify-between border-t border-border pt-4">
             <div className="tabular">
-              {o.price_inr === 0 ? <span className="text-primary font-display font-bold text-xl">Free</span> :
-                <span className="text-accent font-display font-bold text-xl">₹{o.price_inr?.toLocaleString()}</span>}
+              {!price ? <span className="text-primary font-display font-bold text-xl">Free</span> :
+                <span className="text-accent font-display font-bold text-xl">{formatPrice(o, currency)}</span>}
             </div>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground text-sm font-medium px-5 py-2.5 group-hover:opacity-90 transition-opacity">
               Enroll Now <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
