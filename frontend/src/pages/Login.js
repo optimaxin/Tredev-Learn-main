@@ -7,12 +7,18 @@ import { formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+
+  const destFor = (user) => loc.state?.from ||
+    (user.role === "acharya" ? "/acharya" :
+     user.role === "academic_staff" ? "/staff" :
+     (user.role === "admin" || user.role === "super_admin") ? "/admin" : "/learner");
 
   const submit = async (e) => {
     e.preventDefault();
@@ -20,15 +26,23 @@ export default function Login() {
     try {
       const user = await login(email, password);
       toast.success(`Welcome back, ${user.name}.`);
-      const dest = loc.state?.from ||
-        (user.role === "acharya" ? "/acharya" :
-         user.role === "academic_staff" ? "/staff" :
-         (user.role === "admin" || user.role === "super_admin") ? "/admin" : "/learner");
-      nav(dest);
+      nav(destFor(user));
     } catch (err) {
       toast.error(formatApiError(err));
     }
     setBusy(false);
+  };
+
+  const submitGoogle = async () => {
+    setGoogleBusy(true);
+    try {
+      const user = await loginWithGoogle();
+      toast.success(`Welcome, ${user.name}.`);
+      nav(destFor(user));
+    } catch (err) {
+      toast.error(formatApiError(err) || "Google sign-in failed.");
+    }
+    setGoogleBusy(false);
   };
 
   return (
@@ -49,12 +63,21 @@ export default function Login() {
         <Button disabled={busy} type="submit" data-testid="login-submit" className="w-full h-12 rounded-full">
           {busy ? "Signing in…" : "Sign in"}
         </Button>
+        <div className="relative py-2 text-center text-xs text-muted-foreground">
+          <span className="bg-background px-2 relative z-10">or</span>
+          <div className="absolute left-0 right-0 top-1/2 border-t border-border" />
+        </div>
+        <Button type="button" variant="outline" disabled={googleBusy} onClick={submitGoogle}
+          data-testid="login-google" className="w-full h-12 rounded-full">
+          {googleBusy ? "Signing in…" : "Continue with Google"}
+        </Button>
         <p className="text-sm text-muted-foreground pt-3">
           New here? <Link to="/register" className="link-underline text-primary">Create an account</Link>
         </p>
         <div className="pt-6 mt-6 border-t border-border text-xs text-muted-foreground">
           <div className="uppercase tracking-widest text-[10px] mb-2">Test accounts (MVP)</div>
           <div>learner@tredevlearn.com / Learner@123</div>
+          <div>learner1@tredevlearn.com / Learner1@123</div>
           <div>acharya@tredevlearn.com / Acharya@123</div>
           <div>staff@tredevlearn.com / Staff@123</div>
           <div>staff1@tredevlearn.com / Staff1@123</div>

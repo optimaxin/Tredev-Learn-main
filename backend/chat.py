@@ -74,7 +74,25 @@ async def get_current_user(request: Request) -> dict:
     user = await db.users.find_one({"firebase_uid": uid})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if _is_locked_out(user, token):
+        raise HTTPException(status_code=401, detail="Account suspended")
     return sanitize_user(user)
+
+
+def _is_locked_out(user: dict, token: str) -> bool:
+    """Mirrors server.py's suspend/soft-delete/force-logout check (duplicated
+    here, not imported, to avoid a circular import with server.py)."""
+    if user.get("suspended") or user.get("is_deleted"):
+        return True
+    force_logout_at = user.get("force_logout_at")
+    if force_logout_at:
+        try:
+            cutoff = datetime.fromisoformat(force_logout_at).timestamp()
+        except ValueError:
+            cutoff = 0
+        if firebase_auth.token_issued_at(token) < cutoff:
+            return True
+    return False
 
 
 async def get_current_user_optional(request: Request) -> Optional[dict]:
@@ -374,7 +392,9 @@ async def _resolve_ws_user(websocket: WebSocket) -> Optional[dict]:
         decoded = await firebase_auth.verify_id_token(token)
         uid = decoded.get("uid") or decoded.get("user_id")
         user = await db.users.find_one({"firebase_uid": uid})
-        return sanitize_user(user) if user else None
+        if not user or _is_locked_out(user, token):
+            return None
+        return sanitize_user(user)
     except Exception:
         return None
 

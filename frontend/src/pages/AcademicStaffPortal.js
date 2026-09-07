@@ -82,9 +82,10 @@ export default function AcademicStaffPortal() {
   const submitLock = useRef(false);
   const [newSession, setNewSession] = useState({
     title: "", offering_id: "", acharya_id: "", starts_at: "", duration_min: 60, mode: "interactive",
-    join_url: "", topic: "", thumbnail_url: "",
+    join_url: "", topic: "", thumbnail_url: "", recording_url: "", batch_id: "",
   });
   const [editSession, setEditSession] = useState(null); // session being edited (id + fields)
+  const [sessionBatches, setSessionBatches] = useState([]); // batches for whichever offering is selected in the session form
   const [editWebinar, setEditWebinar] = useState(null); // webinar being edited
   const [newWebinar, setNewWebinar] = useState({
     title: "", cover_image: "", starts_at: "", duration_min: 90,
@@ -119,6 +120,16 @@ export default function AcademicStaffPortal() {
     setMantras(arr(mn));
   };
   useEffect(() => { load(); }, []);
+
+  // Batches for whichever offering is currently selected in the session form
+  // (create or edit) — only live_course offerings have any.
+  const sessionOfferingId = editSession ? editSession.offering_id : newSession.offering_id;
+  useEffect(() => {
+    if (!sessionOfferingId) { setSessionBatches([]); return; }
+    api.get("/batches", { params: { offering_id: sessionOfferingId } })
+      .then(({ data }) => setSessionBatches(Array.isArray(data) ? data : []))
+      .catch(() => setSessionBatches([]));
+  }, [sessionOfferingId]);
 
   const createOffering = async (e) => {
     e.preventDefault();
@@ -180,7 +191,7 @@ export default function AcademicStaffPortal() {
       const isoTime = new Date(newSession.starts_at).toISOString();
       await api.post("/live-sessions", { ...newSession, starts_at: isoTime, duration_min: parseInt(newSession.duration_min) });
       toast.success("Session scheduled.");
-      setNewSession({ title: "", offering_id: "", acharya_id: "", starts_at: "", duration_min: 60, mode: "interactive", join_url: "", topic: "", thumbnail_url: "" });
+      setNewSession({ title: "", offering_id: "", acharya_id: "", starts_at: "", duration_min: 60, mode: "interactive", join_url: "", topic: "", thumbnail_url: "", recording_url: "", batch_id: "" });
       load();
     } catch (err) { toast.error(formatApiError(err)); }
   };
@@ -198,6 +209,7 @@ export default function AcademicStaffPortal() {
     acharya_id: s.acharya_id || "", starts_at: toLocalInput(s.starts_at),
     duration_min: s.duration_min || 60, mode: s.mode || "interactive",
     join_url: s.join_url || "", topic: s.topic || "", thumbnail_url: s.thumbnail_url || "",
+    recording_url: s.recording_url || "", batch_id: s.batch_id || "",
   });
 
   const saveEditSession = async () => {
@@ -210,7 +222,8 @@ export default function AcademicStaffPortal() {
         starts_at: new Date(editSession.starts_at).toISOString(),
         duration_min: parseInt(editSession.duration_min), mode: editSession.mode,
         join_url: editSession.join_url, topic: editSession.topic,
-        thumbnail_url: editSession.thumbnail_url,
+        thumbnail_url: editSession.thumbnail_url, recording_url: editSession.recording_url,
+        batch_id: editSession.batch_id,
       });
       toast.success("Session updated.");
       setEditSession(null);
@@ -471,6 +484,15 @@ export default function AcademicStaffPortal() {
                 </SelectContent>
               </Select>
             </div>
+            {sessionBatches.length > 0 && (
+              <div>
+                <label className="eyebrow">Batch (optional)</label>
+                <Select value={newSession.batch_id} onValueChange={(v)=>setNewSession({...newSession, batch_id: v})}>
+                  <SelectTrigger className="mt-2 h-11" data-testid="session-batch"><SelectValue placeholder="Whole course (no specific batch)…"/></SelectTrigger>
+                  <SelectContent>{sessionBatches.map(b=><SelectItem key={b.id} value={b.id}>{b.name} · starts {b.start_date}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <label className="eyebrow">Ācharya</label>
               <Select value={newSession.acharya_id} onValueChange={(v)=>setNewSession({...newSession, acharya_id: v})}>
@@ -489,12 +511,16 @@ export default function AcademicStaffPortal() {
               </div>
             </div>
             <div>
-              <label className="eyebrow">Session link (join URL)</label>
-              <Input value={newSession.join_url} onChange={(e)=>setNewSession({...newSession, join_url: e.target.value})} data-testid="session-link" className="mt-2 h-11" placeholder="https://meet.google.com/… or Zoom link" />
+              <label className="eyebrow">Zoho meeting link (join URL)</label>
+              <Input value={newSession.join_url} onChange={(e)=>setNewSession({...newSession, join_url: e.target.value})} data-testid="session-link" className="mt-2 h-11" placeholder="https://meeting.zoho.in/…" />
             </div>
             <div>
               <label className="eyebrow">Thumbnail image URL</label>
               <Input value={newSession.thumbnail_url} onChange={(e)=>setNewSession({...newSession, thumbnail_url: e.target.value})} data-testid="session-thumbnail" className="mt-2 h-11" placeholder="https://…/thumbnail.jpg" />
+            </div>
+            <div>
+              <label className="eyebrow">Zoho recording URL (add after the class is recorded — shows to enrolled learners who missed it)</label>
+              <Input value={newSession.recording_url} onChange={(e)=>setNewSession({...newSession, recording_url: e.target.value})} data-testid="session-recording" className="mt-2 h-11" placeholder="https://meeting.zoho.in/…/recording" />
             </div>
             <div>
               <label className="eyebrow">Mode</label>
@@ -530,12 +556,19 @@ export default function AcademicStaffPortal() {
                         <SelectContent>{acharyas.map(a=><SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
+                    {sessionBatches.length > 0 && (
+                      <Select value={editSession.batch_id} onValueChange={(v)=>setEditSession({...editSession, batch_id:v})}>
+                        <SelectTrigger className="h-10"><SelectValue placeholder="Batch (optional)"/></SelectTrigger>
+                        <SelectContent>{sessionBatches.map(b=><SelectItem key={b.id} value={b.id}>{b.name} · starts {b.start_date}</SelectItem>)}</SelectContent>
+                      </Select>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       <Input type="datetime-local" value={editSession.starts_at} onChange={(e)=>setEditSession({...editSession, starts_at:e.target.value})} className="h-10" />
                       <Input type="number" value={editSession.duration_min} onChange={(e)=>setEditSession({...editSession, duration_min:e.target.value})} className="h-10" />
                     </div>
-                    <Input value={editSession.join_url} onChange={(e)=>setEditSession({...editSession, join_url:e.target.value})} className="h-10" placeholder="Session link (join URL)" />
+                    <Input value={editSession.join_url} onChange={(e)=>setEditSession({...editSession, join_url:e.target.value})} className="h-10" placeholder="Zoho meeting link (join URL)" />
                     <Input value={editSession.thumbnail_url} onChange={(e)=>setEditSession({...editSession, thumbnail_url:e.target.value})} className="h-10" placeholder="Thumbnail image URL" />
+                    <Input value={editSession.recording_url} onChange={(e)=>setEditSession({...editSession, recording_url:e.target.value})} className="h-10" placeholder="Zoho recording URL (optional)" data-testid={`edit-session-recording-${s.id}`} />
                     <div className="flex gap-2">
                       <Button size="sm" onClick={saveEditSession} className="rounded-full bg-gradient-hot text-white border-0" data-testid={`edit-session-save-${s.id}`}>Save</Button>
                       <Button size="sm" variant="outline" onClick={()=>setEditSession(null)} className="rounded-full">Cancel</Button>
@@ -556,6 +589,7 @@ export default function AcademicStaffPortal() {
                       </div>
                       {s.acharya_name && <div className="text-[11px] text-primary">Ācharya: {s.acharya_name}</div>}
                       {s.join_url && <div className="text-[11px] text-muted-foreground truncate">🔗 {s.join_url}</div>}
+                      {s.recording_url && <div className="text-[11px] text-primary">🎬 Recording attached</div>}
                     </div>
                     {canManageSessions && <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">Edit</span>}
                   </button>

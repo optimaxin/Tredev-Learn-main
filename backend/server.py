@@ -21,6 +21,9 @@ import asyncio
 import requests
 import panchang
 import chat
+import admin
+import coupons
+import cashfree
 from translate import auto_translate
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Any, Dict
@@ -52,6 +55,9 @@ BUNNY_STREAM_API_KEY = os.environ.get("BUNNY_STREAM_API_KEY", "")
 # Must match the "Token Authentication" security key set on the Stream library in Bunny's dashboard.
 BUNNY_TOKEN_SECURITY_KEY = os.environ.get("BUNNY_TOKEN_SECURITY_KEY", "")
 
+# Where Cashfree redirects the browser back to after checkout.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
 
 def ObjectId(x):
     """Compatibility shim: ids are uuid strings now, not bson ObjectIds."""
@@ -61,6 +67,8 @@ def ObjectId(x):
 app = FastAPI(title="Tredev Learn API")
 api_router = APIRouter(prefix="/api")
 api_router.include_router(chat.router)
+api_router.include_router(admin.router)
+api_router.include_router(coupons.router)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -114,6 +122,16 @@ async def get_current_user(request: Request) -> dict:
     user = await db.users.find_one({"firebase_uid": uid})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.get("suspended") or user.get("is_deleted"):
+        raise HTTPException(status_code=401, detail="Account suspended")
+    force_logout_at = user.get("force_logout_at")
+    if force_logout_at:
+        try:
+            cutoff = datetime.fromisoformat(force_logout_at).timestamp()
+        except ValueError:
+            cutoff = 0
+        if firebase_auth.token_issued_at(token) < cutoff:
+            raise HTTPException(status_code=401, detail="Session invalidated, please sign in again")
     return sanitize_user(user)
 
 
@@ -185,6 +203,9 @@ class LoginIn(BaseModel):
     email: EmailStr
     password: str
 
+class GoogleLoginIn(BaseModel):
+    id_token: str
+
 class ConsultationIn(BaseModel):
     name: str
     email: EmailStr
@@ -197,6 +218,7 @@ class LessonWatchIn(BaseModel):
 
 class EnrollIn(BaseModel):
     offering_id: str
+    batch_id: Optional[str] = ""  # required when the offering is a live_course
 
 class SadhanaCheckinIn(BaseModel):
     offering_id: str
@@ -224,6 +246,17 @@ class OfferingIn(BaseModel):
     is_published: bool = False
     festival: Optional[str] = ""
     start_date: Optional[str] = ""
+
+class BatchIn(BaseModel):
+    offering_id: str
+    name: str
+    start_date: str
+    max_students: int = 50
+
+class BatchUpdateIn(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    max_students: Optional[int] = None
 
 class VerseIn(BaseModel):
     scripture: str  # Bhagavad Gita, Rigveda, etc
@@ -279,6 +312,11 @@ class DoubtIn(BaseModel):
 class DoubtAnswerIn(BaseModel):
     answer: str
 
+class LessonCommentIn(BaseModel):
+    offering_id: str
+    lesson_id: str
+    body: str
+
 class QueryTicketIn(BaseModel):
     title: str
     description: Optional[str] = ""
@@ -311,6 +349,8 @@ class LiveSessionCreateIn(BaseModel):
     join_url: Optional[str] = ""
     topic: Optional[str] = ""          # description for standalone (non-course) sessions
     thumbnail_url: Optional[str] = ""
+    recording_url: Optional[str] = ""  # attach after the class if it was recorded
+    batch_id: Optional[str] = ""       # which batch of the (live) course this session is for
 
 class LiveSessionUpdateIn(BaseModel):
     title: Optional[str] = None
@@ -322,6 +362,8 @@ class LiveSessionUpdateIn(BaseModel):
     join_url: Optional[str] = None
     topic: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    recording_url: Optional[str] = None
+    batch_id: Optional[str] = None
 
 class WebinarCreateIn(BaseModel):
     title: str
@@ -452,6 +494,33 @@ async def login(data: LoginIn, response: Response):
     response.set_cookie("access_token", token, httponly=True, secure=False,
                         samesite="lax", max_age=7*24*3600, path="/")
     return {"user": sanitize_user(user), "token": token}
+
+
+@api_router.post("/auth/google")
+async def login_google(data: GoogleLoginIn, response: Response):
+    """Exchange a Firebase ID token obtained via the frontend's Google sign-in
+    popup for our own session cookie — same find-or-self-heal-create flow as
+    password login, just verified instead of freshly issued here."""
+    try:
+        claims = await firebase_auth.verify_id_token(data.id_token)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    fb_uid = claims["uid"]
+    user = await db.users.find_one({"firebase_uid": fb_uid})
+    if not user:
+        email = (claims.get("email") or "").lower()
+        doc = {
+            "firebase_uid": fb_uid, "email": email,
+            "name": claims.get("name") or (email.split("@")[0] if email else "Learner"),
+            "role": "learner", "created_at": now_utc().isoformat(),
+            "avatar_url": claims.get("picture", ""), "bio": "", "parampara": "",
+        }
+        result = await db.users.insert_one(doc)
+        doc["_id"] = result.inserted_id
+        user = doc
+    response.set_cookie("access_token", data.id_token, httponly=True, secure=False,
+                        samesite="lax", max_age=7*24*3600, path="/")
+    return {"user": sanitize_user(user), "token": data.id_token}
 
 
 @api_router.post("/auth/logout")
@@ -604,6 +673,84 @@ async def approve_offering(offering_id: str, decision: ApprovalDecisionIn,
     return {"ok": True}
 
 
+# ==================== BATCHES (live-course cohorts) ====================
+# One live_course offering can run multiple batches — each with its own start
+# date and a capacity cap. Enrollment-capacity enforcement and Zoho scheduling
+# integration are not part of this skeleton; batches are just named cohorts
+# a live session can optionally be scheduled against.
+@api_router.post("/batches")
+async def create_batch(data: BatchIn,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("build"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "course_builder"):
+        raise HTTPException(403, "Course building has not been granted to you by admin — ask an admin to grant the 'course_builder' capability.")
+    doc = data.model_dump()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    r = await db.batches.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    await write_audit(actor, "batch.create", str(r.inserted_id), {"offering_id": data.offering_id, "name": data.name})
+    return sanitize_doc(doc)
+
+
+@api_router.get("/batches")
+async def list_batches(offering_id: Optional[str] = None):
+    q = {"offering_id": offering_id} if offering_id else {}
+    items = await db.batches.find(q).sort("start_date", 1).to_list(200)
+    result = []
+    for b in items:
+        b = sanitize_doc(b)
+        b["enrolled_count"] = await db.enrollments.count_documents({"batch_id": b["id"]})
+        b["seats_available"] = max(0, int(b.get("max_students") or 0) - b["enrolled_count"])
+        result.append(b)
+    return result
+
+
+async def _check_batch_seat(offering_id: str, batch_id: str) -> dict:
+    """Validates a batch belongs to the offering and still has a free seat.
+    Raises HTTPException on any failure; returns the batch doc on success."""
+    if not (batch_id or "").strip():
+        raise HTTPException(400, "This is a live course — pick a batch to enroll in.")
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b or str(b.get("offering_id")) != str(offering_id):
+        raise HTTPException(404, "Batch not found for this course.")
+    enrolled_count = await db.enrollments.count_documents({"batch_id": batch_id})
+    # ponytail: count-then-insert, not a locking transaction — two concurrent
+    # enrollments on the last seat could both pass this check. Fine at this
+    # scale; add a DB-level seat lock if overselling ever actually happens.
+    if enrolled_count >= int(b.get("max_students") or 0):
+        raise HTTPException(400, "This batch is full — pick another batch.")
+    return b
+
+
+@api_router.patch("/batches/{batch_id}")
+async def update_batch(batch_id: str, data: BatchUpdateIn,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("build"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "course_builder"):
+        raise HTTPException(403, "Course building has not been granted to you by admin — ask an admin to grant the 'course_builder' capability.")
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b:
+        raise HTTPException(404, "Batch not found")
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update:
+        await db.batches.update_one({"_id": ObjectId(batch_id)}, {"$set": update})
+    await write_audit(actor, "batch.update", batch_id, update)
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    return sanitize_doc(b)
+
+
+@api_router.delete("/batches/{batch_id}")
+async def delete_batch(batch_id: str,
+                        actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                        _feat: bool = Depends(require_feature("build"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "course_builder"):
+        raise HTTPException(403, "Course building has not been granted to you by admin — ask an admin to grant the 'course_builder' capability.")
+    await db.batches.delete_one({"_id": ObjectId(batch_id)})
+    await write_audit(actor, "batch.delete", batch_id, {})
+    return {"ok": True}
+
+
 # ==================== VERSES (Shloka Player source) ====================
 @api_router.get("/verses")
 async def list_verses(scripture: Optional[str] = None, limit: int = 50):
@@ -649,9 +796,17 @@ async def enroll(data: EnrollIn, user: dict = Depends(get_current_user)):
     existing = await db.enrollments.find_one({"user_id": user["id"], "offering_id": data.offering_id})
     if existing:
         return sanitize_doc(existing)
+    o = await db.offerings.find_one({"_id": ObjectId(data.offering_id)})
+    if not o:
+        raise HTTPException(404, "Offering not found")
+    batch_id = None
+    if o.get("type") == "live_course":
+        await _check_batch_seat(data.offering_id, data.batch_id)
+        batch_id = data.batch_id
     doc = {
         "user_id": user["id"],
         "offering_id": data.offering_id,
+        "batch_id": batch_id,
         "enrolled_at": now_utc().isoformat(),
         "progress": 0,
         "completed_lessons": [],
@@ -659,6 +814,39 @@ async def enroll(data: EnrollIn, user: dict = Depends(get_current_user)):
     }
     result = await db.enrollments.insert_one(doc)
     doc["_id"] = result.inserted_id
+    return sanitize_doc(doc)
+
+
+class ManualGrantIn(BaseModel):
+    user_id: str
+    offering_id: str
+    note: Optional[str] = ""
+
+
+@api_router.post("/enrollments/manual-grant")
+async def manual_grant_enrollment(data: ManualGrantIn,
+                                   actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Staff/admin grants a course directly, bypassing payment — e.g. a learner
+    paid but the enrollment never landed. Tagged source='manual' so the purchase
+    log/audit trail can tell it apart from a real checkout."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "manual_access_grant"):
+        raise HTTPException(403, "Manual access grants has not been granted to you by admin — ask an admin to grant the 'manual_access_grant' capability.")
+    o = await db.offerings.find_one({"_id": ObjectId(data.offering_id)})
+    if not o:
+        raise HTTPException(404, "Offering not found")
+    existing = await db.enrollments.find_one({"user_id": data.user_id, "offering_id": data.offering_id})
+    if existing:
+        return sanitize_doc(existing)
+    doc = {
+        "user_id": data.user_id, "offering_id": data.offering_id,
+        "enrolled_at": now_utc().isoformat(), "progress": 0,
+        "completed_lessons": [], "status": "active",
+        "source": "manual", "granted_by": actor["id"],
+    }
+    result = await db.enrollments.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    await write_audit(actor, "enrollment.manual_grant", data.user_id,
+                       {"offering_id": data.offering_id, "note": data.note})
     return sanitize_doc(doc)
 
 
@@ -1310,6 +1498,30 @@ async def answer_doubt(did: str, data: DoubtAnswerIn,
     return {"ok": True}
 
 
+# ==================== LESSON COMMENTS (plain per-video discussion) ====================
+# Distinct from doubts (Q&A with staff): any logged-in learner can post and
+# see a normal comment thread under a lesson's video.
+@api_router.post("/lesson-comments")
+async def post_lesson_comment(data: LessonCommentIn, user: dict = Depends(get_current_user)):
+    if not data.body.strip():
+        raise HTTPException(400, "Comment can't be empty.")
+    doc = {
+        "offering_id": data.offering_id, "lesson_id": data.lesson_id, "body": data.body.strip(),
+        "author_id": user["id"], "author_name": user.get("name", ""),
+        "created_at": now_utc().isoformat(),
+    }
+    r = await db.lesson_comments.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return sanitize_doc(doc)
+
+
+@api_router.get("/lesson-comments")
+async def list_lesson_comments(offering_id: str, lesson_id: str, user: dict = Depends(get_current_user)):
+    items = await db.lesson_comments.find(
+        {"offering_id": offering_id, "lesson_id": lesson_id}).sort("created_at", 1).to_list(500)
+    return [sanitize_doc(c) for c in items]
+
+
 # ==================== QUERIES (ticketed chat — GUVI/Zen Class style) ====================
 QUERY_STAFF_ROLES = ("academic_staff", "admin", "super_admin")
 
@@ -1494,6 +1706,49 @@ async def reassign_query_ticket(ticket_id: str, data: QueryReassignIn,
     await write_audit(actor, "query.reassign", ticket_id, {"staff_id": staff_id})
     t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
     return await _hydrate_ticket(t)
+
+
+class QueryEscalateIn(BaseModel):
+    note: Optional[str] = ""
+
+
+@api_router.post("/queries/{ticket_id}/escalate")
+async def escalate_query_ticket(ticket_id: str, data: QueryEscalateIn,
+                                 actor: dict = Depends(require_role(*QUERY_STAFF_ROLES))):
+    """Staff flags a ticket for admin attention (e.g. 'paid but course access
+    missing' — something staff can't verify/fix themselves). Admin already sees
+    every ticket via /queries/all; this adds a signal for which ones need them."""
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    t = sanitize_doc(t)
+    _check_query_access(t, actor)
+    now = now_utc().isoformat()
+    await db.query_tickets.update_one({"_id": ObjectId(ticket_id)}, {"$set": {
+        "escalated": True, "escalated_at": now, "escalated_by": actor["id"],
+        "escalation_note": (data.note or "").strip(), "updated_at": now,
+    }})
+    await write_audit(actor, "query.escalate", ticket_id, {"note": data.note})
+    t2 = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    return await _hydrate_ticket(t2)
+
+
+@api_router.post("/queries/{ticket_id}/resolve-escalation")
+async def resolve_query_escalation(ticket_id: str, actor: dict = Depends(require_role("admin", "super_admin"))):
+    t = await db.query_tickets.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        raise HTTPException(404, "Query not found")
+    await db.query_tickets.update_one({"_id": ObjectId(ticket_id)},
+        {"$set": {"escalated": False, "updated_at": now_utc().isoformat()}})
+    await write_audit(actor, "query.escalation_resolved", ticket_id, {})
+    return {"ok": True}
+
+
+@api_router.get("/queries/escalated")
+async def list_escalated_queries(actor: dict = Depends(require_role("admin", "super_admin"))):
+    """Filtered view: tickets staff flagged as needing admin attention."""
+    items = await db.query_tickets.find({"escalated": True}).sort("escalated_at", -1).to_list(500)
+    return [await _hydrate_ticket(x) for x in items]
 
 
 # ==================== FEATURE TOGGLES ====================
@@ -1805,35 +2060,133 @@ async def create_order(payload: dict, user: dict = Depends(get_current_user)):
     o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
     if not o:
         raise HTTPException(404, "Offering not found")
+    amount_inr = o.get("price_inr", 0)
+    coupon_id = None
+    coupon_code = (payload.get("coupon_code") or "").strip()
+    if coupon_code:
+        amount_inr, coupon_id = await coupons.apply_coupon(coupon_code, offering_id, amount_inr)
     order_id = f"order_mock_{secrets.token_hex(8)}"
     doc = {
         "order_id": order_id, "user_id": user["id"], "offering_id": offering_id,
-        "amount_inr": o.get("price_inr", 0), "status": "created",
+        "amount_inr": amount_inr, "status": "created",
         "created_at": now_utc().isoformat(), "mocked": True,
     }
     await db.payments.insert_one(doc)
-    return {"order_id": order_id, "amount": o.get("price_inr", 0), "mocked": True,
+    return {"order_id": order_id, "amount": amount_inr, "coupon_id": coupon_id, "mocked": True,
             "note": "MOCKED Razorpay — no real payment collected."}
 
 
 @api_router.post("/payments/webhook-mock")
 async def payment_webhook_mock(payload: dict):
-    """MOCKED payment success webhook. In production, verify Razorpay signature."""
+    """MOCKED payment success webhook. Superseded by /payments/cashfree/webhook
+    below for real orders — left in place for the old free/mocked test path."""
     order_id = payload["order_id"]
     p = await db.payments.find_one({"order_id": order_id})
     if not p:
         raise HTTPException(404, "Order not found")
-    await db.payments.update_one({"order_id": order_id},
-        {"$set": {"status": "paid", "paid_at": now_utc().isoformat()}})
-    # auto-enroll user
+    await _mark_paid_and_enroll(p, verified=False)
+    return {"ok": True}
+
+
+async def _mark_paid_and_enroll(p: dict, verified: bool):
+    """Shared by the real webhook and the status-reconciliation fallback —
+    idempotent: a payment already marked paid is left alone, and enrollment
+    is never duplicated."""
+    if p.get("status") != "paid":
+        await db.payments.update_one({"order_id": p["order_id"]},
+            {"$set": {"status": "paid", "paid_at": now_utc().isoformat(), "signature_verified": verified}})
     existing = await db.enrollments.find_one({"user_id": p["user_id"], "offering_id": p["offering_id"]})
     if not existing:
         await db.enrollments.insert_one({
             "user_id": p["user_id"], "offering_id": p["offering_id"],
+            "batch_id": p.get("batch_id"),
             "enrolled_at": now_utc().isoformat(), "progress": 0,
             "completed_lessons": [], "status": "active",
         })
+
+
+@api_router.post("/payments/cashfree/create-order")
+async def create_cashfree_order(payload: dict, user: dict = Depends(get_current_user)):
+    """Real Cashfree order — replaces the mocked create-order for live testing.
+    Frontend takes the returned payment_session_id into Cashfree's Checkout JS."""
+    offering_id = payload["offering_id"]
+    o = await db.offerings.find_one({"_id": ObjectId(offering_id)})
+    if not o:
+        raise HTTPException(404, "Offering not found")
+    batch_id = (payload.get("batch_id") or "").strip() or None
+    if o.get("type") == "live_course":
+        await _check_batch_seat(offering_id, batch_id)
+    amount_inr = o.get("price_inr", 0)
+    coupon_id = None
+    coupon_code = (payload.get("coupon_code") or "").strip()
+    if coupon_code:
+        amount_inr, coupon_id = await coupons.apply_coupon(coupon_code, offering_id, amount_inr)
+    if amount_inr <= 0:
+        raise HTTPException(400, "This course is free — no order needed.")
+    order_id = f"tredev_{secrets.token_hex(8)}"
+    try:
+        cf = await asyncio.to_thread(
+            cashfree.create_order, order_id, float(amount_inr), "INR",
+            user["id"], user.get("email", ""), "",
+            f"{FRONTEND_URL}/courses/{offering_id}",
+        )
+    except cashfree.CashfreeError as e:
+        raise HTTPException(e.status, e.message)
+    doc = {
+        "order_id": order_id, "user_id": user["id"], "offering_id": offering_id,
+        "batch_id": batch_id,
+        "amount_inr": amount_inr, "status": "created", "created_at": now_utc().isoformat(),
+        "mocked": False, "gateway": "cashfree", "cf_order_id": cf.get("cf_order_id") or cf.get("order_id"),
+        "currency": "INR", "signature_verified": False,
+    }
+    await db.payments.insert_one(doc)
+    return {"order_id": order_id, "amount": amount_inr, "coupon_id": coupon_id,
+            "payment_session_id": cf.get("payment_session_id")}
+
+
+@api_router.post("/payments/cashfree/webhook")
+async def cashfree_webhook(request: Request):
+    """Real webhook, signature-verified — the gap the old mocked webhook left
+    wide open (anyone who knew an order_id could mark it paid)."""
+    raw = await request.body()
+    signature = request.headers.get("x-webhook-signature", "")
+    timestamp = request.headers.get("x-webhook-timestamp", "")
+    if not cashfree.verify_webhook_signature(raw, timestamp, signature):
+        raise HTTPException(401, "Invalid webhook signature")
+    payload = await request.json()
+    event_type = payload.get("type", "")
+    order_id = ((payload.get("data") or {}).get("order") or {}).get("order_id")
+    if not order_id:
+        logger.warning(f"Cashfree webhook missing order_id: {payload}")
+        return {"ok": True}
+    p = await db.payments.find_one({"order_id": order_id})
+    if not p:
+        logger.warning(f"Cashfree webhook for unknown order_id={order_id}")
+        return {"ok": True}
+    if event_type == "PAYMENT_SUCCESS_WEBHOOK":
+        await _mark_paid_and_enroll(p, verified=True)
+    elif event_type in ("PAYMENT_FAILED_WEBHOOK", "PAYMENT_USER_DROPPED_WEBHOOK"):
+        await db.payments.update_one({"order_id": order_id}, {"$set": {"status": "failed"}})
     return {"ok": True}
+
+
+@api_router.get("/payments/{order_id}/status")
+async def payment_status(order_id: str, user: dict = Depends(get_current_user)):
+    """Reconciliation fallback the frontend calls after the checkout redirect
+    returns — covers a delayed or dropped webhook instead of trusting the
+    client to self-report success."""
+    p = await db.payments.find_one({"order_id": order_id})
+    if not p or p.get("user_id") != user["id"]:
+        raise HTTPException(404, "Order not found")
+    if p.get("status") != "paid" and p.get("gateway") == "cashfree":
+        try:
+            cf = await asyncio.to_thread(cashfree.get_order_status, order_id)
+            if cf.get("order_status") == "PAID":
+                await _mark_paid_and_enroll(p, verified=True)
+                p = await db.payments.find_one({"order_id": order_id})
+        except cashfree.CashfreeError as e:
+            logger.warning(f"Cashfree status lookup failed for {order_id}: {e.message}")
+    return sanitize_doc(p)
 
 
 # ==================== FESTIVAL CALENDAR (staff-managed, CSV-fed) ====================
@@ -2338,6 +2691,15 @@ def session_join_window(s: dict, now: datetime):
     return can_join, is_live
 
 
+def session_is_past(s: dict, now: datetime) -> bool:
+    """True once a session's join window has fully closed."""
+    try:
+        start = datetime.fromisoformat(s["starts_at"])
+    except Exception:
+        return False
+    return now > start + timedelta(minutes=int(s.get("duration_min", 60)))
+
+
 @api_router.get("/live-sessions")
 async def list_live_sessions(acharya_id: Optional[str] = None,
                               offering_id: Optional[str] = None):
@@ -2374,18 +2736,31 @@ async def acharya_live_sessions(user: dict = Depends(require_role("acharya"))):
 
 @api_router.get("/live-sessions/mine-learner")
 async def learner_live_sessions(user: dict = Depends(get_current_user)):
-    """Sessions for the courses this learner is enrolled in."""
+    """Sessions for the courses this learner is enrolled in. For a live_course
+    with a batch assigned, only that batch's sessions (plus whole-course
+    sessions with no batch set) are shown — not every batch's timetable."""
     now = now_utc()
     enrollments = await db.enrollments.find({"user_id": user["id"]}).to_list(500)
     enrolled_ids = [e.get("offering_id") for e in enrollments if e.get("offering_id")]
     if not enrolled_ids:
         return []
+    my_batch_by_offering = {e["offering_id"]: e.get("batch_id") for e in enrollments if e.get("batch_id")}
     items = await db.live_sessions.find(
         {"offering_id": {"$in": enrolled_ids}}).sort("starts_at", 1).to_list(500)
+    items = [s for s in items if not (
+        my_batch_by_offering.get(s.get("offering_id")) and s.get("batch_id")
+        and s["batch_id"] != my_batch_by_offering[s["offering_id"]]
+    )]
     result = []
     for s in items:
         s = sanitize_doc(s)
+        # A session past its join window with no recording attached is dead
+        # weight in the learner's portal — drop it instead of showing a
+        # perpetual "opens soon" badge for a class that already happened.
+        if session_is_past(s, now) and not (s.get("recording_url") or "").strip():
+            continue
         s["can_join"], s["is_live"] = session_join_window(s, now)
+        s["is_past"] = session_is_past(s, now)
         try:
             o = await db.offerings.find_one({"_id": ObjectId(s.get("offering_id",""))})
             if o: s["offering_title"] = o.get("title", "")
@@ -2694,6 +3069,33 @@ async def get_lesson_playback(offering_id: str, lesson_id: str,
     return _bunny_embed_token_url(video_id)
 
 
+# ==================== GEO / CURRENCY ====================
+# ponytail: process-lifetime dict, unbounded — fine at this traffic scale;
+# move to a TTL cache (e.g. redis) if the distinct-IP count grows large.
+GEO_CACHE = {}
+
+@api_router.get("/geo")
+async def detect_geo(request: Request):
+    """Best-effort visitor country -> display currency (INR vs USD), from the
+    request's IP. Defaults to INR (home market) whenever the lookup is
+    inconclusive — local/dev IPs, a blocked/rate-limited lookup, etc."""
+    xff = request.headers.get("x-forwarded-for", "")
+    ip = (xff.split(",")[0].strip() if xff else "") or (request.client.host if request.client else "")
+    if ip in GEO_CACHE:
+        return GEO_CACHE[ip]
+    country = ""
+    if ip:
+        try:
+            resp = await asyncio.to_thread(requests.get, f"https://ipapi.co/{ip}/country/", timeout=3)
+            if resp.ok and resp.text.strip().isalpha():
+                country = resp.text.strip()
+        except Exception:
+            pass
+    result = {"currency": "USD" if country and country != "IN" else "INR", "country": country}
+    GEO_CACHE[ip] = result
+    return result
+
+
 # ==================== ROOT ====================
 @api_router.get("/")
 async def root():
@@ -2959,7 +3361,7 @@ async def seed_admin_and_data():
                 "audio_url": "",
             },
     ]
-    existing_refs = {(v["scripture"], v["reference"]) async for v in db.verses.find({}, {"scripture": 1, "reference": 1})}
+    existing_refs = {(v["scripture"], v["reference"]) for v in await db.verses.find({}).to_list(1000)}
     new_verses = [v for v in verses if (v["scripture"], v["reference"]) not in existing_refs]
     if new_verses:
         for v in new_verses:

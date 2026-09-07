@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { CurrencyProvider } from "@/context/CurrencyContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { Toaster } from "sonner";
 import Layout from "@/components/Layout";
@@ -55,6 +56,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+      <CurrencyProvider>
         <BrowserRouter>
           <Toaster position="top-right" richColors theme="system" />
           <Layout>
@@ -90,6 +92,7 @@ export default function App() {
             </Routes>
           </Layout>
         </BrowserRouter>
+      </CurrencyProvider>
       </AuthProvider>
     </ThemeProvider>
   );

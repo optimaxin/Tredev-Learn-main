@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
+import AdminUsersTab from "@/components/admin/AdminUsersTab";
+import AdminCoursesTab from "@/components/admin/AdminCoursesTab";
+import AdminDashboardTab from "@/components/admin/AdminDashboardTab";
+import AdminPurchasesTab from "@/components/admin/AdminPurchasesTab";
+import AdminCouponsTab from "@/components/admin/AdminCouponsTab";
+import AdminCreateAdminTab from "@/components/admin/AdminCreateAdminTab";
 
-const CAPABILITIES = ["course_builder", "offerings", "quiz_author", "assessment_author", "session_author", "webinars", "mantras", "certs", "queries", "mentors", "calendar", "journal_author", "grader", "doubts", "consultations"];
+const CAPABILITIES = ["course_builder", "offerings", "quiz_author", "assessment_author", "session_author", "webinars", "mantras", "certs", "queries", "mentors", "calendar", "journal_author", "grader", "doubts", "consultations", "manual_access_grant"];
 const CAPABILITY_LABELS = {
   course_builder: "Course builder",
   offerings: "All offerings",
@@ -26,8 +30,8 @@ const CAPABILITY_LABELS = {
   grader: "Grading",
   doubts: "Doubts",
   consultations: "Consultations",
+  manual_access_grant: "Manual course access grants",
 };
-const ROLES = ["learner", "acharya", "academic_staff", "admin", "super_admin"];
 const FEATURE_LABELS = {
   build: "Course builder",
   offerings: "All offerings",
@@ -73,14 +77,6 @@ export default function AdminPortal() {
   };
   useEffect(() => { load(); }, []);
 
-  const changeRole = async (uid, role) => {
-    try {
-      await api.patch(`/users/${uid}`, { role });
-      toast.success("Role updated.");
-      load();
-    } catch (e) { toast.error(formatApiError(e)); }
-  };
-
   const staff = users.filter((u) => u.role === "academic_staff");
   const hasGrant = (staffId, cap) => grants.some((g) => g.staff_id === staffId && g.capability === cap);
   const findGrant = (staffId, cap) => grants.find((g) => g.staff_id === staffId && g.capability === cap);
@@ -104,14 +100,6 @@ export default function AdminPortal() {
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
-  const publishOffering = async (o) => {
-    try {
-      await api.patch(`/offerings/${o.id}`, { is_published: !o.is_published });
-      toast.success(!o.is_published ? "Published." : "Unpublished.");
-      load();
-    } catch (e) { toast.error(formatApiError(e)); }
-  };
-
   const issueCert = async (learnerId, offeringId) => {
     try {
       const { data } = await api.post("/certificates/issue", { user_id: learnerId, offering_id: offeringId });
@@ -129,15 +117,24 @@ export default function AdminPortal() {
         {isSuper && <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest ml-auto">Super Admin authority</Badge>}
       </div>
 
-      <Tabs defaultValue="capabilities" className="mt-10">
+      <Tabs defaultValue={isSuper ? "dashboard" : "capabilities"} className="mt-10">
         <TabsList className="flex-wrap h-auto">
+          {isSuper && <TabsTrigger value="dashboard" data-testid="admin-tab-dashboard">Dashboard</TabsTrigger>}
+          {isSuper && <TabsTrigger value="purchases" data-testid="admin-tab-purchases">Purchases</TabsTrigger>}
           <TabsTrigger value="features" data-testid="admin-tab-features">Feature toggles</TabsTrigger>
           <TabsTrigger value="capabilities" data-testid="admin-tab-capabilities">Capability grants</TabsTrigger>
           <TabsTrigger value="users" data-testid="admin-tab-users">Users ({users.length})</TabsTrigger>
-          <TabsTrigger value="publishing" data-testid="admin-tab-publishing">Publishing ({offerings.length})</TabsTrigger>
+          <TabsTrigger value="publishing" data-testid="admin-tab-publishing">Courses ({offerings.length})</TabsTrigger>
           <TabsTrigger value="festivals" data-testid="admin-tab-festivals">Festival calendar</TabsTrigger>
           <TabsTrigger value="audit" data-testid="admin-tab-audit">Audit log</TabsTrigger>
+          {isSuper && <TabsTrigger value="coupons" data-testid="admin-tab-coupons">Coupons</TabsTrigger>}
+          {isSuper && <TabsTrigger value="create-admin" data-testid="admin-tab-create-admin">Create admin</TabsTrigger>}
         </TabsList>
+
+        {isSuper && <TabsContent value="dashboard" className="mt-8"><AdminDashboardTab /></TabsContent>}
+        {isSuper && <TabsContent value="purchases" className="mt-8"><AdminPurchasesTab /></TabsContent>}
+        {isSuper && <TabsContent value="coupons" className="mt-8"><AdminCouponsTab /></TabsContent>}
+        {isSuper && <TabsContent value="create-admin" className="mt-8"><AdminCreateAdminTab onCreated={load} /></TabsContent>}
 
         {/* Feature toggles */}
         <TabsContent value="features" className="mt-8">
@@ -202,53 +199,12 @@ export default function AdminPortal() {
 
         {/* Users */}
         <TabsContent value="users" className="mt-8">
-          <div className="rounded-lg border border-border bg-card/60 overflow-x-auto">
-            <Table>
-              <TableHeader><TableRow>
-                <TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead><TableHead className="text-right">Change role</TableHead>
-              </TableRow></TableHeader>
-              <TableBody>
-                {users.map((u)=>(
-                  <TableRow key={u.id} data-testid={`user-row-${u.id}`}>
-                    <TableCell className="font-serif">{u.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{u.email}</TableCell>
-                    <TableCell><Badge variant="outline" className="uppercase tracking-widest text-[10px]">{u.role.replace("_"," ")}</Badge></TableCell>
-                    <TableCell className="text-right">
-                      <Select value={u.role} onValueChange={(v)=>changeRole(u.id, v)}>
-                        <SelectTrigger className="w-44 h-9 ml-auto" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {ROLES.map((r)=>{
-                            if (r === "super_admin" && !isSuper) return null;
-                            return <SelectItem key={r} value={r}>{r.replace("_"," ")}</SelectItem>;
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <AdminUsersTab users={users} isSuper={isSuper} onReload={load} />
         </TabsContent>
 
-        {/* Publishing */}
-        <TabsContent value="publishing" className="mt-8 space-y-3">
-          {offerings.map((o)=>(
-            <div key={o.id} className="rounded-lg border border-border p-4 bg-card/60 flex items-center gap-4" data-testid={`pub-row-${o.id}`}>
-              <div className="flex-1">
-                <div className="font-serif text-lg">{o.title}</div>
-                <div className="text-xs text-muted-foreground">{o.subject} · {o.type.replace("_"," ")}</div>
-              </div>
-              <Badge variant={o.approved_by_acharya ? "default" : "outline"} className="text-[10px] uppercase tracking-widest">
-                {o.approved_by_acharya ? "Ācharya ✓" : "No sign-off"}
-              </Badge>
-              <div className="flex items-center gap-2">
-                <span className="text-xs">{o.is_published ? "Live" : "Draft"}</span>
-                <Switch checked={!!o.is_published} onCheckedChange={()=>publishOffering(o)} data-testid={`publish-${o.id}`} />
-              </div>
-            </div>
-          ))}
-          <p className="text-xs text-muted-foreground pt-2">Guarantee: an Ācharya's name is never shown as approving a course they haven't signed off on.</p>
+        {/* Courses */}
+        <TabsContent value="publishing" className="mt-8">
+          <AdminCoursesTab offerings={offerings} onReload={load} />
         </TabsContent>
 
         {/* Festivals */}

@@ -8,6 +8,7 @@ import LessonManager from "@/components/LessonManager";
 import LessonComments from "@/components/LessonComments";
 import AssessmentBuilder from "@/components/AssessmentBuilder";
 import VideoPlayer from "@/components/VideoPlayer";
+import BatchManager from "@/components/staff/BatchManager";
 
 /** Card grid of an academic staff member's offerings; clicking one opens a
  * tabbed detail view (Course details / Lessons / Assessment). Staff without
@@ -90,10 +91,11 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
         <TabsList>
           <TabsTrigger value="details" data-testid="offering-tab-details">Course details</TabsTrigger>
           <TabsTrigger value="lessons" data-testid="offering-tab-lessons">Lessons ({lessons.length})</TabsTrigger>
+          {selected.type === "live_course" && <TabsTrigger value="batches" data-testid="offering-tab-batches">Batches</TabsTrigger>}
           <TabsTrigger value="assessment" data-testid="offering-tab-assessment">Assessment</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="details" className="mt-6 space-y-4">
+        <TabsContent value="details" className="mt-6 space-y-4 data-[state=inactive]:hidden" forceMount>
           {canEditOfferings ? (
             <>
               <div className="flex items-center gap-3 flex-wrap">
@@ -114,7 +116,7 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
           )}
         </TabsContent>
 
-        <TabsContent value="lessons" className="mt-6 space-y-6">
+        <TabsContent value="lessons" className="mt-6 space-y-6 data-[state=inactive]:hidden" forceMount>
           {canEditOfferings && (
             <>
               <h4 className="font-display font-semibold">Lessons — recorded video & written content</h4>
@@ -147,7 +149,13 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
           )}
         </TabsContent>
 
-        <TabsContent value="assessment" className="mt-6">
+        {selected.type === "live_course" && (
+          <TabsContent value="batches" className="mt-6 data-[state=inactive]:hidden" forceMount>
+            <BatchManager offeringId={selected.id} acharyas={acharyas} />
+          </TabsContent>
+        )}
+
+        <TabsContent value="assessment" className="mt-6 data-[state=inactive]:hidden" forceMount>
           <AssessmentBuilder offeringId={selected.id} canAuthorQuiz={canAuthorAssessment} enabled={assessmentsEnabled} />
         </TabsContent>
       </Tabs>

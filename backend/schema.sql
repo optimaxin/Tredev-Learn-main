@@ -412,6 +412,41 @@ ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS festival_id   uuid;
 -- Custom stream thumbnail for the Live Session cards on the Events page.
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS thumbnail_url text DEFAULT '';
 
+-- Recording attached after the live class ends (or for a session scheduled
+-- purely to host a recorded lesson) — lets a missed session stay watchable
+-- instead of just expiring.
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS recording_url text DEFAULT '';
+
+-- ==================== BATCHES (live-course cohorts) ====================
+-- A live_course offering can run multiple batches, each with its own start
+-- date and a capacity cap. A live session can optionally target one batch.
+CREATE TABLE IF NOT EXISTS batches (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    offering_id  uuid NOT NULL,
+    name         text NOT NULL,
+    start_date   text,
+    max_students integer DEFAULT 50,
+    created_at   text,
+    created_by   uuid
+);
+CREATE INDEX IF NOT EXISTS idx_batches_offering ON batches(offering_id);
+
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS batch_id uuid;
+
+-- ==================== LESSON COMMENTS (per-video discussion) ====================
+-- Plain comment thread under a lesson's video — any enrolled learner can post,
+-- distinct from the staff-facing doubts Q&A thread.
+CREATE TABLE IF NOT EXISTS lesson_comments (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    offering_id uuid NOT NULL,
+    lesson_id   text NOT NULL,
+    body        text NOT NULL,
+    author_id   uuid,
+    author_name text DEFAULT '',
+    created_at  text
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_comments_lesson ON lesson_comments(offering_id, lesson_id);
+
 -- Staff edits to an already-published course assessment are held here until an
 -- Ācharya approves them; the live doc's top-level fields stay untouched until then.
 ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS pending_changes jsonb;
@@ -515,3 +550,59 @@ ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS description_hi text;
 -- One Bunny Stream "collection" (folder) per course, created lazily on first video upload.
 ALTER TABLE offerings  ADD COLUMN IF NOT EXISTS bunny_collection_id text;
 CREATE INDEX IF NOT EXISTS idx_chat_channel_members_user ON chat_channel_members(user_id);
+
+-- ==================== ADMIN / SUPER-ADMIN PLATFORM ====================
+-- User lifecycle: suspend (blocks login+API instantly, reversible), soft-delete
+-- (blocks login, preserves FK history in payments/enrollments/audit_log), and a
+-- soft force-logout marker (see docs/PERMISSIONS_AND_ACCESS.md §3.1 for the
+-- real limitation this has without the Firebase Admin SDK).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended      boolean DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted     boolean DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS force_logout_at text;
+
+-- Course merchandising flags + archive (distinct from is_published/draft).
+ALTER TABLE offerings ADD COLUMN IF NOT EXISTS is_popular     boolean DEFAULT false;
+ALTER TABLE offerings ADD COLUMN IF NOT EXISTS is_recommended boolean DEFAULT false;
+ALTER TABLE offerings ADD COLUMN IF NOT EXISTS is_verified    boolean DEFAULT false;
+ALTER TABLE offerings ADD COLUMN IF NOT EXISTS is_archived    boolean DEFAULT false;
+
+-- Track how an enrollment was created (paid checkout vs a staff/admin manual grant).
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS source     text DEFAULT 'purchase';
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS granted_by uuid;
+
+-- Escalation: staff flags a ticket for admin attention (on top of the existing
+-- OPEN/ASSIGNED/CLOSED status and admin's existing reassign ability).
+ALTER TABLE query_tickets ADD COLUMN IF NOT EXISTS escalated       boolean DEFAULT false;
+ALTER TABLE query_tickets ADD COLUMN IF NOT EXISTS escalated_at    text;
+ALTER TABLE query_tickets ADD COLUMN IF NOT EXISTS escalated_by    uuid;
+ALTER TABLE query_tickets ADD COLUMN IF NOT EXISTS escalation_note text DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_query_tickets_escalated ON query_tickets(escalated);
+
+-- Coupons: admin/super_admin-managed discounts, applied at payment order creation.
+CREATE TABLE IF NOT EXISTS coupons (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    code           text UNIQUE NOT NULL,
+    discount_type  text NOT NULL DEFAULT 'percent',
+    discount_value integer NOT NULL DEFAULT 0,
+    offering_id    uuid,
+    max_uses       integer,
+    used_count     integer DEFAULT 0,
+    valid_from     text,
+    valid_until    text,
+    active         boolean DEFAULT true,
+    is_special     boolean DEFAULT false,
+    created_by     uuid,
+    created_at     text
+);
+CREATE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code);
+
+-- Cashfree Payment Gateway fields — replaces the mocked/self-reported flow.
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS gateway            text DEFAULT 'mock';
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS cf_order_id        text;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency           text DEFAULT 'INR';
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS signature_verified boolean DEFAULT false;
+
+-- Which batch (cohort) of a live_course an enrollment/order is for — lets a
+-- live course cap seats per batch instead of per whole course.
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS batch_id uuid;
+ALTER TABLE payments    ADD COLUMN IF NOT EXISTS batch_id uuid;

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import SadhanaCounter from "@/components/SadhanaCounter";
 import VideoPlayer from "@/components/VideoPlayer";
+import VideoComments from "@/components/VideoComments";
 import { CheckCircle2, Circle, PlayCircle, Award, ClipboardList, Radio, Video } from "lucide-react";
 
 const certLabel = (t, status) => ({
@@ -98,7 +99,8 @@ export default function CourseWorkspace({ offeringId }) {
 
   if (!offering) return <div className="p-10 text-center text-muted-foreground text-sm">{t("common.loading")}</div>;
 
-  const modules = offering.modules || [];
+  const isLiveCourse = offering.type === "live_course";
+  const modules = isLiveCourse ? [] : (offering.modules || []);
   const totalLessons = modules.length;
   const pct = totalLessons ? Math.round((completed.length / totalLessons) * 100) : 0;
   const active = modules[activeIdx];
@@ -113,13 +115,17 @@ export default function CourseWorkspace({ offeringId }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-medium text-muted-foreground">{completed.length}/{totalLessons} {t("courseWorkspace.lessonsComplete")}</div>
-        <div className="text-sm font-semibold tabular">{pct}%</div>
-      </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden mb-8" data-testid="course-progress">
-        <div className="h-full bg-gradient-hot transition-all duration-500" style={{ width: `${pct}%` }} />
-      </div>
+      {!isLiveCourse && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-muted-foreground">{completed.length}/{totalLessons} {t("courseWorkspace.lessonsComplete")}</div>
+            <div className="text-sm font-semibold tabular">{pct}%</div>
+          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden mb-8" data-testid="course-progress">
+            <div className="h-full bg-gradient-hot transition-all duration-500" style={{ width: `${pct}%` }} />
+          </div>
+        </>
+      )}
 
       {/* Certificate — unlocks only after the assessment (if any) has been attempted */}
       {pct === 100 && (
@@ -188,7 +194,13 @@ export default function CourseWorkspace({ offeringId }) {
                 <div className="font-display font-semibold">{s.title}</div>
                 <div className="text-xs text-muted-foreground tabular">{new Date(s.starts_at).toLocaleString()} · {s.duration_min} {t("courseWorkspace.min")}</div>
               </div>
-              {s.can_join ? (
+              {s.recording_url ? (
+                <a href={s.recording_url} target="_blank" rel="noopener noreferrer">
+                  <Button size="sm" className="rounded-full bg-gradient-hot text-white border-0">
+                    {t("courseWorkspace.watchRecording")}
+                  </Button>
+                </a>
+              ) : s.can_join ? (
                 <Button size="sm" onClick={() => joinSession(s)} disabled={joiningId === s.id} className="rounded-full bg-gradient-hot text-white border-0">
                   {joiningId === s.id ? t("courseWorkspace.joining") : t("courseWorkspace.joinNow")}
                 </Button>
@@ -200,7 +212,14 @@ export default function CourseWorkspace({ offeringId }) {
         </div>
       )}
 
-      {totalLessons === 0 ? (
+      {isLiveCourse ? (
+        sessions.length === 0 && (
+          <div className="rounded-xl border border-border bg-card p-10 text-center">
+            <Radio className="w-8 h-8 mx-auto text-primary/60 mb-3" />
+            <p className="text-sm text-muted-foreground">No sessions scheduled yet — check back soon for the class timetable.</p>
+          </div>
+        )
+      ) : totalLessons === 0 ? (
         <div className="rounded-xl border border-border bg-card p-10 text-center">
           <PlayCircle className="w-8 h-8 mx-auto text-primary/60 mb-3" />
           <p className="text-sm text-muted-foreground">{t("courseWorkspace.curriculumSoon")}</p>
@@ -252,6 +271,7 @@ export default function CourseWorkspace({ offeringId }) {
                 {activeDone ? <><Award className="w-3.5 h-3.5 mr-1 inline" />{t("courseWorkspace.completed")}</> : t("courseWorkspace.notYetAttended")}
               </Badge>
             </div>
+            <VideoComments offeringId={offeringId} lessonId={activeId} />
           </div>
         </div>
       )}
