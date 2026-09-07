@@ -65,6 +65,9 @@ def ObjectId(x):
 
 
 app = FastAPI(title="Tredev Learn API")
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 api_router = APIRouter(prefix="/api")
 api_router.include_router(chat.router)
 api_router.include_router(admin.router)
