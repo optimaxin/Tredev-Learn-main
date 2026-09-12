@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,17 @@ function groupThreads(items, keyOf) {
 
 export default function AcademicStaffPortal() {
   const { user } = useAuth();
+  // Top-level section lives in the URL (not local state) so a batch's "Back to
+  // Staff Panel" link can return the user to the exact tab (and, inside
+  // Offerings, the exact offering + sub-tab) they came from.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "build";
+  const setActiveTab = (v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set("tab", v);
+    if (v !== "offerings") { next.delete("offering"); next.delete("subtab"); }
+    return next;
+  });
   const { isEnabled } = useFeatureToggles();
   const { hasCapability } = useCapabilities();
   const canAuthorQuiz = user?.role !== "academic_staff" || hasCapability("quiz_author");
@@ -66,8 +78,22 @@ export default function AcademicStaffPortal() {
   const [users, setUsers] = useState([]);
   const [webinars, setWebinars] = useState([]);
   const [sessions, setSessions] = useState([]);
+  // "All scheduled sessions" grouped by batch (sessions with no batch_id fall
+  // into one "standalone" bucket) instead of one long flat list.
+  const sessionGroups = useMemo(() => {
+    const groups = new Map();
+    for (const s of sessions) {
+      const key = s.batch_id || "__standalone__";
+      if (!groups.has(key)) groups.set(key, { key, batchId: s.batch_id || null, batchName: s.batch_name || "", offeringTitle: s.offering_title || "", items: [] });
+      groups.get(key).items.push(s);
+    }
+    return Array.from(groups.values());
+  }, [sessions]);
   const [pendingCerts, setPendingCerts] = useState([]);
+  const [rejectedCerts, setRejectedCerts] = useState([]);
+  const [resubmittingCode, setResubmittingCode] = useState(null);
   const [mantras, setMantras] = useState([]);
+  const [editingMantra, setEditingMantra] = useState(null);
   const [viewingCert, setViewingCert] = useState(null);
 
   const [replyText, setReplyText] = useState({});
@@ -95,7 +121,7 @@ export default function AcademicStaffPortal() {
   const [issueForm, setIssueForm] = useState({ user_id: "", offering_id: "" });
 
   const load = async () => {
-    const [o, cn, a, con, cg, u, w, s, pc, mn] = await Promise.all([
+    const [o, cn, a, con, cg, u, w, s, pc, mn, rc] = await Promise.all([
       api.get("/offerings?published_only=false").catch(()=>({data:[]})),
       api.get("/consultations/mine").catch(()=>({data:[]})),
       api.get("/acharyas").catch(()=>({data:[]})),
@@ -106,6 +132,7 @@ export default function AcademicStaffPortal() {
       api.get("/live-sessions").catch(()=>({data:[]})),
       api.get("/certificates/requests").catch(()=>({data:[]})),
       api.get("/mantras").catch(()=>({data:[]})),
+      api.get("/certificates/rejected").catch(()=>({data:[]})),
     ]);
     const arr = (x) => (Array.isArray(x.data) ? x.data : []);
     setOfferings(arr(o));
@@ -118,6 +145,7 @@ export default function AcademicStaffPortal() {
     setSessions(arr(s));
     setPendingCerts(arr(pc));
     setMantras(arr(mn));
+    setRejectedCerts(arr(rc));
   };
   useEffect(() => { load(); }, []);
 
@@ -329,11 +357,22 @@ export default function AcademicStaffPortal() {
     } catch (err) { toast.error(formatApiError(err)); }
   };
 
+  const resubmitCert = async (code) => {
+    setResubmittingCode(code);
+    try {
+      await api.post(`/certificates/${code}/resubmit`);
+      toast.success("Resubmitted — routed back to the Ācharya.");
+      load();
+    } catch (err) { toast.error(formatApiError(err)); }
+    setResubmittingCode(null);
+  };
+
   const STATUS_LABEL = {
     requested: "Requested by learner",
     pending_signature: "Awaiting Ācharya signature",
     signed: "Signed",
     published: "Published",
+    rejected: "Rejected by Ācharya",
   };
 
   const learners = users.filter((u) => u.role === "learner");
@@ -344,7 +383,7 @@ export default function AcademicStaffPortal() {
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">ACADEMIC STAFF PORTAL · THE OPERATIONAL ENGINE</div>
       <h1 className="text-5xl font-display font-bold tracking-tight">{user?.name}</h1>
 
-      <Tabs defaultValue="build" className="mt-10">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
         <TabsList className="flex-wrap h-auto">
           {isEnabled("build") && <TabsTrigger value="build" data-testid="staff-tab-build">Course builder</TabsTrigger>}
           {isEnabled("offerings") && <TabsTrigger value="offerings" data-testid="staff-tab-offerings">All offerings ({offerings.length})</TabsTrigger>}
@@ -539,8 +578,14 @@ export default function AcademicStaffPortal() {
           <div className={canManageSessions ? "" : "lg:col-span-2"}>
             <h3 className="font-display font-bold text-xl mb-4">All scheduled sessions</h3>
             {canManageSessions && <p className="text-xs text-muted-foreground mb-3">Click a session to edit or delete it.</p>}
-            <div className="space-y-3">
-              {sessions.map((s) => (
+            <div className="space-y-6">
+              {sessionGroups.map((g) => (
+              <div key={g.key}>
+                <div className="eyebrow mb-3">
+                  {g.batchId ? `${g.offeringTitle ? g.offeringTitle + " — " : ""}${g.batchName || "Batch"}` : "Standalone sessions (no batch)"}
+                </div>
+                <div className="space-y-3">
+                {g.items.map((s) => (
                 canManageSessions && editSession?.id === s.id ? (
                   <div key={s.id} className="rounded-xl border border-primary/40 p-4 bg-card space-y-3" data-testid={`edit-session-${s.id}`}>
                     <Input value={editSession.title} onChange={(e)=>setEditSession({...editSession, title:e.target.value})} className="h-10" placeholder="Title" />
@@ -594,6 +639,9 @@ export default function AcademicStaffPortal() {
                     {canManageSessions && <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">Edit</span>}
                   </button>
                 )
+                ))}
+                </div>
+              </div>
               ))}
               {sessions.length === 0 && <div className="text-sm text-muted-foreground">No sessions scheduled yet.</div>}
             </div>
@@ -730,7 +778,13 @@ export default function AcademicStaffPortal() {
         {/* MANTRAS — by deity, linked to the festival calendar */}
         {isEnabled("mantras") && (
         <TabsContent value="mantras" className="mt-8 grid lg:grid-cols-[1.4fr_1fr] gap-8">
-          {canManageMantras ? <MantraBuilder onSaved={load} /> : (
+          {canManageMantras ? (
+            <MantraBuilder
+              editing={editingMantra}
+              onSaved={() => { setEditingMantra(null); load(); }}
+              onCancelEdit={() => setEditingMantra(null)}
+            />
+          ) : (
             <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive h-fit" data-testid="mantras-author-disabled">
               Mantras has not been granted to you by admin — you can't add or delete mantras.
             </div>
@@ -743,7 +797,12 @@ export default function AcademicStaffPortal() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="outline" className="text-[10px] uppercase tracking-widest text-accent border-accent/40">{mm.deity}</Badge>
                     <span className="font-display font-semibold">{mm.title}</span>
-                    {canManageMantras && <button onClick={()=>deleteMantra(mm.id)} className="text-muted-foreground hover:text-destructive text-xs ml-auto" data-testid={`mantra-delete-${mm.id}`}>Delete</button>}
+                    {canManageMantras && (
+                      <div className="ml-auto flex items-center gap-3">
+                        <button onClick={()=>setEditingMantra(mm)} className="text-muted-foreground hover:text-primary text-xs" data-testid={`mantra-edit-${mm.id}`}>Edit</button>
+                        <button onClick={()=>deleteMantra(mm.id)} className="text-muted-foreground hover:text-destructive text-xs" data-testid={`mantra-delete-${mm.id}`}>Delete</button>
+                      </div>
+                    )}
                   </div>
                   {mm.devanagari && <div className="font-devanagari text-base mt-2 leading-relaxed line-clamp-2">{mm.devanagari}</div>}
                   {mm.audio_url && <audio src={mm.audio_url} controls className="mt-2 w-full h-8" />}
@@ -868,6 +927,31 @@ export default function AcademicStaffPortal() {
                 </div>
               ))}
               {pendingCerts.length === 0 && <div className="text-muted-foreground text-sm">No pending certificate requests.</div>}
+            </div>
+          </div>
+          )}
+
+          {/* Rejected by Ācharya — fix the issue, then resubmit */}
+          {canManageCerts && rejectedCerts.length > 0 && (
+          <div data-testid="certs-rejected">
+            <h3 className="font-display font-bold text-xl mb-4 flex items-center gap-2 text-destructive">
+              <XCircle className="w-5 h-5" /> Rejected by Ācharya ({rejectedCerts.length})
+            </h3>
+            <div className="space-y-3">
+              {rejectedCerts.map((c) => (
+                <div key={c.id} className="rounded-2xl border border-destructive/30 bg-destructive/5 p-5 flex items-center gap-4 flex-wrap" data-testid={`cert-rejected-${c.code}`}>
+                  <XCircle className="w-5 h-5 text-destructive shrink-0" />
+                  <div className="flex-1 min-w-[220px]">
+                    <div className="font-display font-semibold">{c.user_name} · <span className="font-serif italic">{c.offering_title}</span></div>
+                    <div className="text-[11px] text-muted-foreground font-mono">{c.code} · Ācharya: {c.acharya_name || "—"}</div>
+                    <div className="text-xs text-destructive mt-1">"{c.rejection_note}"</div>
+                  </div>
+                  <Button size="sm" onClick={()=>resubmitCert(c.code)} disabled={resubmittingCode===c.code}
+                    variant="outline" data-testid={`cert-resubmit-${c.code}`} className="rounded-full">
+                    {resubmittingCode===c.code ? "Resubmitting…" : "Resubmit to Ācharya"}
+                  </Button>
+                </div>
+              ))}
             </div>
           </div>
           )}

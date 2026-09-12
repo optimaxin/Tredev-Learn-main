@@ -12,6 +12,7 @@ import AdminDashboardTab from "@/components/admin/AdminDashboardTab";
 import AdminPurchasesTab from "@/components/admin/AdminPurchasesTab";
 import AdminCouponsTab from "@/components/admin/AdminCouponsTab";
 import AdminCreateAdminTab from "@/components/admin/AdminCreateAdminTab";
+import QueriesStaff from "@/components/queries/QueriesStaff";
 
 const CAPABILITIES = ["course_builder", "offerings", "quiz_author", "assessment_author", "session_author", "webinars", "mantras", "certs", "queries", "mentors", "calendar", "journal_author", "grader", "doubts", "consultations", "manual_access_grant"];
 const CAPABILITY_LABELS = {
@@ -117,10 +118,11 @@ export default function AdminPortal() {
         {isSuper && <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest ml-auto">Super Admin authority</Badge>}
       </div>
 
-      <Tabs defaultValue={isSuper ? "dashboard" : "capabilities"} className="mt-10">
+      <Tabs defaultValue={isSuper ? "dashboard" : "queries"} className="mt-10">
         <TabsList className="flex-wrap h-auto">
           {isSuper && <TabsTrigger value="dashboard" data-testid="admin-tab-dashboard">Dashboard</TabsTrigger>}
           {isSuper && <TabsTrigger value="purchases" data-testid="admin-tab-purchases">Purchases</TabsTrigger>}
+          <TabsTrigger value="queries" data-testid="admin-tab-queries">Queries</TabsTrigger>
           <TabsTrigger value="features" data-testid="admin-tab-features">Feature toggles</TabsTrigger>
           <TabsTrigger value="capabilities" data-testid="admin-tab-capabilities">Capability grants</TabsTrigger>
           <TabsTrigger value="users" data-testid="admin-tab-users">Users ({users.length})</TabsTrigger>
@@ -133,6 +135,7 @@ export default function AdminPortal() {
 
         {isSuper && <TabsContent value="dashboard" className="mt-8"><AdminDashboardTab /></TabsContent>}
         {isSuper && <TabsContent value="purchases" className="mt-8"><AdminPurchasesTab /></TabsContent>}
+        <TabsContent value="queries" className="mt-8"><QueriesStaff /></TabsContent>
         {isSuper && <TabsContent value="coupons" className="mt-8"><AdminCouponsTab /></TabsContent>}
         {isSuper && <TabsContent value="create-admin" className="mt-8"><AdminCreateAdminTab onCreated={load} /></TabsContent>}
 

@@ -433,6 +433,16 @@ CREATE INDEX IF NOT EXISTS idx_batches_offering ON batches(offering_id);
 
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS batch_id uuid;
 
+-- Staff-proposed timetable + Acharya approval state for a batch (previously
+-- written by the API but never actually declared as columns here or in
+-- db.py's COLUMNS registry, so every write silently no-opped — fixed here).
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS timetable              jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS schedule_status        text DEFAULT '';
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS schedule_notes         text DEFAULT '';
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS schedule_submitted_at  text;
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS schedule_reviewed_at   text;
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS schedule_source_file_url text DEFAULT '';
+
 -- ==================== LESSON COMMENTS (per-video discussion) ====================
 -- Plain comment thread under a lesson's video — any enrolled learner can post,
 -- distinct from the staff-facing doubts Q&A thread.
@@ -606,3 +616,27 @@ ALTER TABLE payments ADD COLUMN IF NOT EXISTS signature_verified boolean DEFAULT
 -- live course cap seats per batch instead of per whole course.
 ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS batch_id uuid;
 ALTER TABLE payments    ADD COLUMN IF NOT EXISTS batch_id uuid;
+
+-- Self-service profile field (PATCH /users/me) — name/email stay identity-owned
+-- (Firebase + admin-only), phone is the one detail a user can add themselves.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone text DEFAULT '';
+
+-- Certificate sign-off pipeline: an Ācharya can reject (not just sign) a
+-- certificate routed to them; the note is how staff learn what to fix.
+ALTER TABLE certificates ADD COLUMN IF NOT EXISTS rejection_note text DEFAULT '';
+ALTER TABLE certificates ADD COLUMN IF NOT EXISTS rejected_at     text;
+
+-- Mandatory email verification, new signups only: defaults false so existing
+-- rows are never retroactively locked out; /auth/register sets it true.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verify_required boolean DEFAULT false;
+
+-- Self-managed 6-digit email OTP verification (replaces Firebase's link-based
+-- verification email, whose default *.firebaseapp.com sender was being
+-- throttled/spam-filtered and often never arrived).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code_hash  text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at text;
+
+-- Per-course/batch access restriction, distinct from `status` (which tracks
+-- progress: active/completed) — lets an admin block one learner's access to
+-- one enrollment without suspending their whole account.
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS suspended boolean DEFAULT false;

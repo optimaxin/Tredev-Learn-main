@@ -25,6 +25,57 @@ import requests
 
 _IDENTITY_TOOLKIT = "https://identitytoolkit.googleapis.com/v1/accounts"
 
+# Admin SDK is optional: only used for a hard force-logout (revoke refresh
+# tokens). Everything else in this module stays REST-only/Admin-SDK-free.
+_admin_app = None
+_admin_app_tried = False
+
+
+def _admin_app_or_none():
+    """Lazily initialise the Firebase Admin SDK from FIREBASE_* service-account
+    env vars, if they've been filled in with real values. Returns None (not an
+    error) when they're missing or still placeholders, so callers can fall
+    back to the soft (non-Admin-SDK) equivalent."""
+    global _admin_app, _admin_app_tried
+    if _admin_app_tried:
+        return _admin_app
+    _admin_app_tried = True
+    private_key = os.environ.get("FIREBASE_PRIVATE_KEY", "")
+    if not private_key or "YOUR_REAL_KEY_HERE" in private_key:
+        return None
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+        cred = credentials.Certificate({
+            "type": os.environ.get("FIREBASE_TYPE", "service_account"),
+            "project_id": os.environ.get("FIREBASE_PROJECT_ID", ""),
+            "private_key_id": os.environ.get("FIREBASE_PRIVATE_KEY_ID", ""),
+            "private_key": private_key.replace("\\n", "\n"),
+            "client_email": os.environ.get("FIREBASE_CLIENT_EMAIL", ""),
+            "client_id": os.environ.get("FIREBASE_CLIENT_ID", ""),
+            "auth_uri": os.environ.get("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
+            "token_uri": os.environ.get("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+            "auth_provider_x509_cert_url": os.environ.get("FIREBASE_AUTH_PROVIDER_CERT_URL", "https://www.googleapis.com/oauth2/v1/certs"),
+            "client_x509_cert_url": os.environ.get("FIREBASE_CLIENT_CERT_URL", ""),
+            "universe_domain": os.environ.get("FIREBASE_UNIVERSE_DOMAIN", "googleapis.com"),
+        })
+        _admin_app = firebase_admin.initialize_app(cred)
+    except Exception:
+        _admin_app = None
+    return _admin_app
+
+
+async def revoke_refresh_tokens(uid: str) -> bool:
+    """Hard force-logout: invalidates every refresh token for `uid` immediately,
+    everywhere. Returns False (no-op) when the Admin SDK isn't configured yet —
+    callers should keep relying on the soft force_logout_at check in that case."""
+    app = _admin_app_or_none()
+    if not app:
+        return False
+    from firebase_admin import auth as admin_auth
+    await asyncio.to_thread(admin_auth.revoke_refresh_tokens, uid, app=app)
+    return True
+
 
 class AuthError(Exception):
     """Raised on authentication failures; carries an HTTP status + message."""
@@ -96,7 +147,9 @@ async def verify_id_token(token: str) -> dict:
         raise AuthError(401, "Invalid token")
     u = users[0]
     return {"uid": u.get("localId"), "email": u.get("email"),
-            "name": u.get("displayName", ""), "picture": u.get("photoUrl", "")}
+            "name": u.get("displayName", ""), "picture": u.get("photoUrl", ""),
+            "email_verified": bool(u.get("emailVerified", False)),
+            "phone": u.get("phoneNumber", "")}
 
 
 def token_issued_at(token: str) -> int:
@@ -130,6 +183,14 @@ async def send_password_reset(email: str):
     sign-up/sign-in (no Admin SDK needed)."""
     await asyncio.to_thread(
         _rest, "sendOobCode", {"requestType": "PASSWORD_RESET", "email": email},
+    )
+
+
+async def send_verification_email(id_token: str):
+    """Trigger Firebase's email-verification link for the account owning `id_token`
+    (same REST surface as the password-reset email, no Admin SDK needed)."""
+    await asyncio.to_thread(
+        _rest, "sendOobCode", {"requestType": "VERIFY_EMAIL", "idToken": id_token},
     )
 
 

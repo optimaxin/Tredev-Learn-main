@@ -10,6 +10,7 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import QueryTicketList from "@/components/queries/QueryTicketList";
 import QueryChatThread from "@/components/queries/QueryChatThread";
 import GrantCourseAccessDialog from "@/components/queries/GrantCourseAccessDialog";
+import UserPaymentStatusDialog from "@/components/queries/UserPaymentStatusDialog";
 
 const LIST_POLL_MS = 8000;
 const MSG_POLL_MS = 4000;
@@ -17,7 +18,6 @@ const MSG_POLL_MS = 4000;
 const EMPTY_LABELS = {
   unassigned: "Nothing waiting — the pool is empty.",
   mine: "You haven't claimed any queries yet.",
-  all: "No queries yet.",
   escalated: "Nothing escalated right now.",
 };
 
@@ -25,10 +25,9 @@ const EMPTY_LABELS = {
 export default function QueriesStaff() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
-  const [queue, setQueue] = useState("unassigned");
+  const [queue, setQueue] = useState(isAdmin ? "escalated" : "unassigned");
   const [unassigned, setUnassigned] = useState([]);
   const [mine, setMine] = useState([]);
-  const [all, setAll] = useState([]);
   const [escalated, setEscalated] = useState([]);
   const [staffUsers, setStaffUsers] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -42,22 +41,30 @@ export default function QueriesStaff() {
   const selectedIdRef = useRef(null);
 
   const loadLists = useCallback(async () => {
+    // Admin/super_admin only handle escalated queries here — the unassigned/mine/all
+    // pools are a non-admin staff concern (see #4: admin portal shows escalated-only).
+    if (isAdmin) {
+      const { data } = await api.get("/queries/escalated").catch(() => ({ data: [] }));
+      const escData = Array.isArray(data) ? data : [];
+      setEscalated(escData);
+      if (selectedIdRef.current) {
+        const fresh = escData.find((t) => t.id === selectedIdRef.current);
+        if (fresh) setSelected(fresh);
+      }
+      setLoadingList(false);
+      return;
+    }
     const calls = [
       api.get("/queries/unassigned").catch(() => ({ data: [] })),
       api.get("/queries/assigned-to-me").catch(() => ({ data: [] })),
-      isAdmin ? api.get("/queries/all").catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
-      isAdmin ? api.get("/queries/escalated").catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
     ];
-    const [u, m, a, esc] = await Promise.all(calls);
+    const [u, m] = await Promise.all(calls);
     const uData = Array.isArray(u.data) ? u.data : [];
     const mData = Array.isArray(m.data) ? m.data : [];
-    const aData = Array.isArray(a.data) ? a.data : [];
-    const escData = Array.isArray(esc.data) ? esc.data : [];
     setUnassigned(uData);
     setMine(mData);
-    if (isAdmin) { setAll(aData); setEscalated(escData); }
     if (selectedIdRef.current) {
-      const merged = [...uData, ...mData, ...(isAdmin ? aData : [])];
+      const merged = [...uData, ...mData];
       const fresh = merged.find((t) => t.id === selectedIdRef.current);
       if (fresh) setSelected(fresh);
     }
@@ -69,6 +76,8 @@ export default function QueriesStaff() {
     const id = setInterval(loadLists, LIST_POLL_MS);
     return () => clearInterval(id);
   }, [loadLists]);
+
+  useEffect(() => { if (isAdmin) setQueue("escalated"); }, [isAdmin]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -153,15 +162,14 @@ export default function QueriesStaff() {
   };
 
   const canClose = !!selected && (isAdmin || selected.assigned_staff_id === user?.id);
-  const lists = { unassigned, mine, all, escalated };
+  const lists = { unassigned, mine, escalated };
 
   return (
     <div data-testid="queries-staff">
       <Tabs value={queue} onValueChange={setQueue} className="mb-4">
         <TabsList>
-          <TabsTrigger value="unassigned" data-testid="staff-queue-unassigned">Unassigned ({unassigned.length})</TabsTrigger>
-          <TabsTrigger value="mine" data-testid="staff-queue-mine">My queue ({mine.length})</TabsTrigger>
-          {isAdmin && <TabsTrigger value="all" data-testid="staff-queue-all">All (override) ({all.length})</TabsTrigger>}
+          {!isAdmin && <TabsTrigger value="unassigned" data-testid="staff-queue-unassigned">Unassigned ({unassigned.length})</TabsTrigger>}
+          {!isAdmin && <TabsTrigger value="mine" data-testid="staff-queue-mine">My queue ({mine.length})</TabsTrigger>}
           {isAdmin && (
             <TabsTrigger value="escalated" data-testid="staff-queue-escalated">
               Escalated ({escalated.length})
@@ -209,7 +217,8 @@ export default function QueriesStaff() {
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Resolve escalation
                 </Button>
               )}
-              <div className="ml-auto">
+              <div className="ml-auto flex items-center gap-2">
+                {isAdmin && <UserPaymentStatusDialog userId={selected.user_id} />}
                 <GrantCourseAccessDialog userId={selected.user_id} />
               </div>
             </div>

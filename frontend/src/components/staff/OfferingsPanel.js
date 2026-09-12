@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React from "react";
+import { useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -14,8 +15,30 @@ import BatchManager from "@/components/staff/BatchManager";
  * tabbed detail view (Course details / Lessons / Assessment). Staff without
  * the "offerings" capability see everything read-only — no edit or delete. */
 export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, canAuthorAssessment, canAnswerDoubts, assessmentsEnabled, assignAcharya, load }) {
-  const [selectedId, setSelectedId] = useState(null);
+  // Selected offering + its sub-tab live in the URL, not local state — so
+  // returning from a batch's detail page (via its own back link) lands back
+  // on the exact offering and tab, instead of resetting to the offering grid.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get("offering");
+  const subTab = searchParams.get("subtab") || "details";
   const selected = offerings.find((o) => o.id === selectedId) || null;
+
+  const openOffering = (id) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set("offering", id);
+    next.set("subtab", "details");
+    return next;
+  });
+  const closeOffering = () => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.delete("offering"); next.delete("subtab");
+    return next;
+  });
+  const setSubTab = (v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set("subtab", v);
+    return next;
+  });
 
   if (!selected) {
     return (
@@ -29,7 +52,7 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
           {offerings.map((o) => {
             const lessonCount = Array.isArray(o.modules) ? o.modules.length : 0;
             return (
-              <button key={o.id} type="button" onClick={() => setSelectedId(o.id)}
+              <button key={o.id} type="button" onClick={() => openOffering(o.id)}
                 data-testid={`staff-offering-${o.id}`}
                 className="group text-left flex flex-col rounded-2xl overflow-hidden border border-border bg-card hover:border-primary/50 transition-colors">
                 <div className="relative aspect-[16/10] overflow-hidden bg-muted">
@@ -70,7 +93,7 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
 
   return (
     <div className="space-y-5" data-testid={`staff-offering-detail-${selected.id}`}>
-      <button type="button" onClick={() => setSelectedId(null)}
+      <button type="button" onClick={closeOffering}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> All offerings
       </button>
@@ -87,8 +110,8 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
         </div>
       )}
 
-      <Tabs defaultValue="details">
-        <TabsList>
+      <Tabs value={subTab} onValueChange={setSubTab}>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="details" data-testid="offering-tab-details">Course details</TabsTrigger>
           <TabsTrigger value="lessons" data-testid="offering-tab-lessons">Lessons ({lessons.length})</TabsTrigger>
           {selected.type === "live_course" && <TabsTrigger value="batches" data-testid="offering-tab-batches">Batches</TabsTrigger>}

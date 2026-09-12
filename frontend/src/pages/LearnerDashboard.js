@@ -7,13 +7,81 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Video, Radio, MessageSquare, Award, Zap, BarChart3, BookOpen, CalendarClock } from "lucide-react";
+import { Video, Radio, MessageSquare, Award, Zap, BarChart3, BookOpen, CalendarClock, Download, ChevronLeft, ChevronRight } from "lucide-react";
 import LearnerSidebar from "@/components/LearnerSidebar";
 import CourseWorkspace from "@/components/CourseWorkspace";
 import QueriesUser from "@/components/queries/QueriesUser";
+import CertificateModal from "@/components/CertificateDoc";
+
+function mondayOf(d) {
+  const date = new Date(d);
+  const day = (date.getDay() + 6) % 7; // 0 = Monday
+  date.setDate(date.getDate() - day);
+  return date;
+}
+const isoDate = (d) => d.toISOString().slice(0, 10);
+
+/** One batch's classes, one week at a time — mirrors AcharyaPortal's
+ * BatchWeekSchedule so a batch's whole timetable isn't dumped on the
+ * learner at once either. */
+function BatchWeekSchedule({ batch, onJoin, t }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const monday = mondayOf(new Date());
+  monday.setDate(monday.getDate() + weekOffset * 7);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get("/live-sessions/mine-learner", {
+      params: { batch_id: batch.id, week_start: isoDate(monday), week_end: isoDate(sunday) },
+    }).then(({ data }) => setItems(Array.isArray(data) ? data : []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch.id, weekOffset]);
+
+  return (
+    <div className="rounded-2xl border border-border p-6 bg-card" data-testid={`learner-batch-week-${batch.id}`}>
+      <div className="flex items-center gap-3 flex-wrap mb-3">
+        <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{batch.offering_title}</Badge>
+        <span className="text-xs text-muted-foreground">{batch.name}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button type="button" onClick={() => setWeekOffset((w) => w - 1)} className="p-1.5 rounded-full hover:bg-muted" aria-label="Previous week" data-testid={`learner-batch-week-prev-${batch.id}`}>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs tabular text-muted-foreground">{monday.toLocaleDateString()} – {sunday.toLocaleDateString()}</span>
+          <button type="button" onClick={() => setWeekOffset((w) => w + 1)} className="p-1.5 rounded-full hover:bg-muted" aria-label="Next week" data-testid={`learner-batch-week-next-${batch.id}`}>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      {loading ? (
+        <div className="text-xs text-muted-foreground">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No classes this week.</div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((s) => (
+            <div key={s.id} className="rounded-lg bg-muted/60 p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`learner-batch-week-session-${s.id}`}>
+              <span className="font-display font-semibold">{s.title}</span>
+              <span className="text-xs text-muted-foreground tabular">{new Date(s.starts_at).toLocaleString()} · {s.duration_min} {t("learnerDashboard.min")}</span>
+              {s.can_join && (
+                <Button size="sm" onClick={() => onJoin(s.id)} className="ml-auto rounded-full h-8 px-4 bg-gradient-hot text-white border-0 animate-glow" data-testid={`learner-batch-week-join-${s.id}`}>{t("learnerDashboard.joinNow")}</Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Sample-style mini certificate card that a learner sees for each earned credential. */
-function CertificatePreview({ c }) {
+function CertificatePreview({ c, onDownload }) {
   const { t } = useTranslation();
   return (
     <div className="relative rounded-2xl p-1 bg-gradient-to-br from-amber-500 via-orange-500 to-primary shadow-xl" data-testid={`cert-preview-${c.code}`}>
@@ -66,6 +134,9 @@ function CertificatePreview({ c }) {
             <div className="font-mono">{c.code}</div>
           </div>
           {c.revoked && <div className="mt-3 text-xs text-red-700 font-semibold">{t("learnerDashboard.certPreview.revoked")}</div>}
+          <Button onClick={() => onDownload(c)} className="mt-5 rounded-full bg-gradient-hot text-white border-0" data-testid={`cert-preview-download-${c.code}`}>
+            <Download className="w-4 h-4 mr-2" /> {t("learnerDashboard.certPreview.download")}
+          </Button>
         </div>
       </div>
     </div>
@@ -77,10 +148,12 @@ export default function LearnerDashboard() {
   const { user } = useAuth();
   const [enrollments, setEnrollments] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [myBatches, setMyBatches] = useState([]); // enrolled batches — Live tab shows these week-by-week, not all at once
   const [certs, setCerts] = useState([]);
   const [doubts, setDoubts] = useState([]);
   const [events, setEvents] = useState([]);
   const [openCourseId, setOpenCourseId] = useState(null);
+  const [downloadingCert, setDownloadingCert] = useState(null);
 
   const load = async () => {
     const [e, s, c, d, w, reg] = await Promise.all([
@@ -92,12 +165,19 @@ export default function LearnerDashboard() {
       api.get("/webinars/my-registrations").catch(()=>({data:[]})),
     ]);
     const arr = (x) => (Array.isArray(x.data) ? x.data : []);
-    setEnrollments(arr(e));
+    const myEnrollments = arr(e);
+    setEnrollments(myEnrollments);
     setSessions(arr(s));
     setCerts(arr(c));
     setDoubts(arr(d));
     const regSet = new Set(arr(reg));
     setEvents(arr(w).filter((x) => regSet.has(x.id)));
+
+    const batchIds = [...new Set(myEnrollments.map((x) => x.batch_id).filter(Boolean))];
+    const batches = await Promise.all(
+      batchIds.map((id) => api.get(`/batches/${id}`).catch(() => null))
+    );
+    setMyBatches(batches.filter(Boolean).map((r) => r.data));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (user) load(); }, [user?.id]);
@@ -117,7 +197,7 @@ export default function LearnerDashboard() {
 
       <div className="mt-10">
       <Tabs defaultValue="courses" className="grid lg:grid-cols-[260px_1fr] gap-10 items-start">
-        <TabsList className="flex lg:flex-col h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3" data-testid="learner-nav">
+        <TabsList className="flex flex-wrap lg:flex-nowrap lg:flex-col h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3" data-testid="learner-nav">
           <TabsTrigger value="courses" data-testid="learner-tab-courses" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
             <BookOpen className="w-4 h-4 mr-3 shrink-0" /> {t("learnerDashboard.tabStudy")}
           </TabsTrigger>
@@ -190,31 +270,46 @@ export default function LearnerDashboard() {
           <LearnerSidebar user={user} enrollments={enrollments} certs={certs} sessions={sessions} doubts={doubts} />
         </TabsContent>
 
-        {/* LIVE */}
-        <TabsContent value="live" className="mt-8">
-          <div className="space-y-3">
-            {sessions.map((s) => (
-              <div key={s.id} className="rounded-xl border border-border p-5 bg-card flex items-center gap-4" data-testid={`session-${s.id}`}>
-                <div className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center text-primary">
-                  {s.mode === "broadcast" ? <Radio className="w-5 h-5" /> : <Video className="w-5 h-5" />}
-                </div>
-                <div className="flex-1">
-                  <div className="font-display font-semibold text-lg">{s.title}</div>
-                  <div className="text-xs text-muted-foreground tabular">
-                    {new Date(s.starts_at).toLocaleString()} · {s.duration_min} {t("learnerDashboard.min")} · {s.mode}
+        {/* LIVE — batch-wise, one week at a time per batch; standalone
+            (non-batch) sessions listed separately below since a week
+            window doesn't apply to those. */}
+        <TabsContent value="live" className="mt-8 space-y-6">
+          {myBatches.length > 0 && (
+            <div className="space-y-3">
+              {myBatches.map((b) => <BatchWeekSchedule key={b.id} batch={b} onJoin={join} t={t} />)}
+            </div>
+          )}
+
+          {(() => {
+            const standalone = sessions.filter((s) => !s.batch_id);
+            if (myBatches.length > 0 && standalone.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                {myBatches.length > 0 && <div className="eyebrow">Other sessions</div>}
+                {standalone.map((s) => (
+                  <div key={s.id} className="rounded-xl border border-border p-5 bg-card flex items-center gap-4" data-testid={`session-${s.id}`}>
+                    <div className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center text-primary">
+                      {s.mode === "broadcast" ? <Radio className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-display font-semibold text-lg">{s.title}</div>
+                      <div className="text-xs text-muted-foreground tabular">
+                        {new Date(s.starts_at).toLocaleString()} · {s.duration_min} {t("learnerDashboard.min")} · {s.mode}
+                      </div>
+                    </div>
+                    {s.can_join ? (
+                      <Button onClick={() => join(s.id)} data-testid={`join-${s.id}`} className="rounded-full px-6 bg-gradient-hot text-white border-0 animate-glow">
+                        {t("learnerDashboard.joinNow")}
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{t("learnerDashboard.opensSoon")}</Badge>
+                    )}
                   </div>
-                </div>
-                {s.can_join ? (
-                  <Button onClick={() => join(s.id)} data-testid={`join-${s.id}`} className="rounded-full px-6 bg-gradient-hot text-white border-0 animate-glow">
-                    {t("learnerDashboard.joinNow")}
-                  </Button>
-                ) : (
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{t("learnerDashboard.opensSoon")}</Badge>
-                )}
+                ))}
+                {standalone.length === 0 && <div className="text-muted-foreground text-sm">{t("learnerDashboard.noSessions")}</div>}
               </div>
-            ))}
-            {sessions.length === 0 && <div className="text-muted-foreground text-sm">{t("learnerDashboard.noSessions")}</div>}
-          </div>
+            );
+          })()}
         </TabsContent>
 
         {/* EVENTS — registered webinars/events */}
@@ -258,13 +353,14 @@ export default function LearnerDashboard() {
           ) : (
             <div className="grid md:grid-cols-2 gap-8" data-testid="learner-certs">
               {certs.map((c) => (
-                <CertificatePreview key={c.id} c={c} />
+                <CertificatePreview key={c.id} c={c} onDownload={setDownloadingCert} />
               ))}
             </div>
           )}
         </TabsContent>
       </Tabs>
       </div>
+      <CertificateModal cert={downloadingCert} onClose={() => setDownloadingCert(null)} />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 
 let auth = null;
+let recaptchaVerifier = null;
 
 // Lazy init — this module is pulled in app-wide via AuthContext, so
 // initializing at import time would crash the whole app (not just Google
@@ -26,5 +27,24 @@ function getFirebaseAuth() {
  * chosen account — the backend verifies it and finds-or-creates the user. */
 export async function signInWithGoogle() {
   const { user } = await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
+  return user.getIdToken();
+}
+
+/** Sends an SMS OTP to `phoneNumber` (E.164 format, e.g. "+919876543210").
+ * `recaptchaContainerId` must be an element already mounted in the DOM.
+ * Returns a Firebase ConfirmationResult — pass the user's entered code to
+ * confirmPhoneOtp() to finish sign-in. */
+export async function sendPhoneOtp(phoneNumber, recaptchaContainerId) {
+  const auth = getFirebaseAuth();
+  if (!recaptchaVerifier) {
+    recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: "invisible" });
+  }
+  return signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+}
+
+/** Confirms the SMS code against the ConfirmationResult from sendPhoneOtp()
+ * and returns a Firebase ID token for the backend's /auth/phone endpoint. */
+export async function confirmPhoneOtp(confirmationResult, code) {
+  const { user } = await confirmationResult.confirm(code);
   return user.getIdToken();
 }

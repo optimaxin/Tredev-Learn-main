@@ -1,13 +1,21 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Trash2, Users, CalendarPlus } from "lucide-react";
+import { Plus, Trash2, Users, CalendarPlus, ListChecks } from "lucide-react";
 
 const emptyBatch = () => ({ name: "", start_date: "", max_students: 50 });
 const emptySession = () => ({ title: "", acharya_id: "", starts_at: "", duration_min: 60, join_url: "" });
+
+const SCHEDULE_STATUS_LABEL = {
+  pending_approval: "Awaiting Ācharya approval",
+  approved: "Approved by Ācharya",
+  changes_requested: "Changes requested",
+};
 
 /** Batches for a live_course offering — cohorts with their own start date,
  * a capacity cap, and a live seat count. Each batch row can also schedule a
@@ -126,7 +134,16 @@ export default function BatchManager({ offeringId, acharyas = [] }) {
                   Starts {b.start_date} · {b.enrolled_count ?? 0}/{b.max_students} enrolled ·{" "}
                   {seatsLeft > 0 ? `${seatsLeft} seat${seatsLeft === 1 ? "" : "s"} left` : "Full"}
                 </div>
+                {b.schedule_status && (
+                  <Badge variant={b.schedule_status === "approved" ? "default" : b.schedule_status === "changes_requested" ? "destructive" : "outline"}
+                    className="mt-1.5 text-[10px] uppercase tracking-widest">
+                    {SCHEDULE_STATUS_LABEL[b.schedule_status] || b.schedule_status}
+                  </Badge>
+                )}
               </div>
+              <Button asChild size="sm" variant="outline" className="rounded-full" data-testid={`batch-open-${b.id}`}>
+                <Link to={`/staff/batches/${b.id}`}><ListChecks className="w-4 h-4 mr-1" /> Open batch</Link>
+              </Button>
               <Button size="sm" variant="outline" className="rounded-full" onClick={() => openScheduleFor(b.id)} data-testid={`batch-schedule-${b.id}`}>
                 <CalendarPlus className="w-4 h-4 mr-1" /> Schedule session
               </Button>
@@ -135,6 +152,13 @@ export default function BatchManager({ offeringId, acharyas = [] }) {
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
+
+            {b.schedule_status === "changes_requested" && b.schedule_notes && (
+              <div className="mx-4 mb-4 rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-xs" data-testid={`batch-schedule-notes-${b.id}`}>
+                <span className="uppercase tracking-widest text-[9px] text-destructive font-semibold">Ācharya requested changes: </span>
+                {b.schedule_notes}
+              </div>
+            )}
 
             {schedulingFor === b.id && (
               <form onSubmit={(e) => submitSession(e, b.id)} className="border-t border-border p-4 grid sm:grid-cols-2 gap-3" data-testid={`batch-session-form-${b.id}`}>

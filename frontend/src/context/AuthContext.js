@@ -36,8 +36,31 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
-  const register = async (email, password, name) => {
-    const { data } = await api.post("/auth/register", { email, password, name });
+  const register = async (email, password) => {
+    // No auto-login here — the account isn't usable until the emailed OTP is verified.
+    // Name is collected afterwards via completeProfile(), once the code is confirmed.
+    const { data } = await api.post("/auth/register", { email, password });
+    return data;
+  };
+
+  const resendVerification = async (email, password) => {
+    const { data } = await api.post("/auth/resend-verification", { email, password });
+    return data;
+  };
+
+  const verifyOtp = async (email, code) => {
+    const { data } = await api.post("/auth/verify-otp", { email, code });
+    return data;
+  };
+
+  const completeProfile = async (name, phone) => {
+    const { data } = await api.post("/auth/complete-profile", { name, phone: phone || null });
+    setUser(data.user);
+    return data.user;
+  };
+
+  const loginWithPhone = async (idToken, extra) => {
+    const { data } = await api.post("/auth/phone", { id_token: idToken, ...extra });
     if (data.token) localStorage.setItem("tredev_token", data.token);
     setUser(data.user);
     return data.user;
@@ -50,7 +73,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, register, logout, refresh: fetchMe }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, loginWithPhone, register, resendVerification, verifyOtp, completeProfile, logout, refresh: fetchMe }}>
       {children}
     </AuthContext.Provider>
   );

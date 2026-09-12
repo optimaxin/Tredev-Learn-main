@@ -1,12 +1,13 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import UserDetailDialog from "@/components/admin/UserDetailDialog";
 import { toast } from "sonner";
-import { Ban, CheckCircle2, Trash2, KeyRound, LogOut, Eye } from "lucide-react";
+import { Ban, CheckCircle2, Trash2, KeyRound, LogOut, Search } from "lucide-react";
 
 const ROLES = ["learner", "acharya", "academic_staff", "admin", "super_admin"];
 
@@ -14,9 +15,46 @@ const ROLES = ["learner", "acharya", "academic_staff", "admin", "super_admin"];
  * suspend/reactivate, soft-delete, reset-password email, force-logout, and a
  * profile/purchase-history detail view. */
 export default function AdminUsersTab({ users, isSuper, onReload }) {
-  const [detail, setDetail] = useState(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [courseFilter, setCourseFilter] = useState("all");
+  const [batchFilter, setBatchFilter] = useState("all");
+  const [courses, setCourses] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
+
+  useEffect(() => {
+    api.get("/offerings", { params: { published_only: false } }).then(({ data }) => setCourses(Array.isArray(data) ? data : [])).catch(() => {});
+    api.get("/admin/enrollments-index").then(({ data }) => setEnrollments(Array.isArray(data) ? data : [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setBatchFilter("all");
+    if (courseFilter === "all") { setBatches([]); return; }
+    api.get("/batches", { params: { offering_id: courseFilter } }).then(({ data }) => setBatches(Array.isArray(data) ? data : [])).catch(() => setBatches([]));
+  }, [courseFilter]);
+
+  // Learners enrolled in the selected course (and, if picked, the selected batch within it).
+  const enrolledUserIds = useMemo(() => {
+    if (courseFilter === "all") return null;
+    const ids = new Set(
+      enrollments
+        .filter((e) => e.offering_id === courseFilter && (batchFilter === "all" || e.batch_id === batchFilter))
+        .map((e) => e.user_id)
+    );
+    return ids;
+  }, [enrollments, courseFilter, batchFilter]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return users.filter((u) => {
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (enrolledUserIds && !enrolledUserIds.has(u.id)) return false;
+      if (!q) return true;
+      return (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
+    });
+  }, [users, search, roleFilter, enrolledUserIds]);
 
   const changeRole = async (uid, role) => {
     try {
@@ -48,36 +86,63 @@ export default function AdminUsersTab({ users, isSuper, onReload }) {
     runAction(u.id, "User deleted.", () => api.delete(`/admin/users/${u.id}`));
   };
 
-  const viewDetail = async (u) => {
-    setLoadingDetail(true);
-    setDetail({ user: u });
-    try {
-      const { data } = await api.get(`/admin/users/${u.id}/detail`);
-      setDetail(data);
-    } catch (e) { toast.error(formatApiError(e)); }
-    setLoadingDetail(false);
-  };
-
   return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or email…" className="pl-9 h-10" data-testid="users-search" />
+        </div>
+        <Select value={roleFilter} onValueChange={setRoleFilter}>
+          <SelectTrigger className="w-48 h-10" data-testid="users-role-filter"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All roles</SelectItem>
+            {ROLES.map((r) => <SelectItem key={r} value={r}>{r.replace("_", " ")}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={courseFilter} onValueChange={setCourseFilter}>
+          <SelectTrigger className="w-56 h-10" data-testid="users-course-filter"><SelectValue placeholder="All courses" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All courses</SelectItem>
+            {courses.map((c) => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {courseFilter !== "all" && (
+          <Select value={batchFilter} onValueChange={setBatchFilter}>
+            <SelectTrigger className="w-48 h-10" data-testid="users-batch-filter"><SelectValue placeholder="All batches" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All batches</SelectItem>
+              {batches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
     <div className="rounded-lg border border-border bg-card/60 overflow-x-auto">
       <Table>
         <TableHeader><TableRow>
-          <TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead>
-          <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
+          <TableHead className="whitespace-nowrap">Name</TableHead><TableHead className="whitespace-nowrap">Email</TableHead><TableHead className="whitespace-nowrap">Role</TableHead>
+          <TableHead className="whitespace-nowrap">Status</TableHead><TableHead className="text-right whitespace-nowrap">Actions</TableHead>
         </TableRow></TableHeader>
         <TableBody>
-          {users.map((u) => (
+          {filtered.map((u) => {
+            // Only super_admin may touch a super_admin account — role change,
+            // suspend, delete, force-logout, reset-password, all of it. The
+            // backend enforces this too; this just keeps the UI honest about it.
+            const locked = u.role === "super_admin" && !isSuper;
+            return (
             <TableRow key={u.id} data-testid={`user-row-${u.id}`}>
-              <TableCell className="font-serif">{u.name}</TableCell>
-              <TableCell className="font-mono text-xs">{u.email}</TableCell>
+              <TableCell className="font-serif whitespace-nowrap">{u.name}</TableCell>
+              <TableCell className="font-mono text-xs whitespace-nowrap">{u.email}</TableCell>
               <TableCell>
-                <Select value={u.role} onValueChange={(v) => changeRole(u.id, v)}>
-                  <SelectTrigger className="w-40 h-9" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
+                <Select value={u.role} onValueChange={(v) => changeRole(u.id, v)} disabled={locked}>
+                  <SelectTrigger className="w-40 h-9 shrink-0" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {ROLES.map((r) => {
-                      if (r === "super_admin" && !isSuper) return null;
-                      return <SelectItem key={r} value={r}>{r.replace("_", " ")}</SelectItem>;
-                    })}
+                    {ROLES.map((r) => (
+                      <SelectItem key={r} value={r} disabled={r === "super_admin" && !isSuper}>
+                        {r.replace("_", " ")}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </TableCell>
@@ -88,59 +153,31 @@ export default function AdminUsersTab({ users, isSuper, onReload }) {
               </TableCell>
               <TableCell className="text-right whitespace-nowrap">
                 <div className="flex items-center justify-end gap-1.5">
-                  <Button size="icon" variant="ghost" className="h-8 w-8" title="View profile & history"
-                    onClick={() => viewDetail(u)} data-testid={`user-view-${u.id}`}><Eye className="w-4 h-4" /></Button>
+                  <UserDetailDialog user={u} />
                   {u.suspended ? (
-                    <Button size="icon" variant="ghost" className="h-8 w-8" title="Reactivate" disabled={busyId === u.id}
+                    <Button size="icon" variant="ghost" className="h-8 w-8" title="Reactivate" disabled={locked || busyId === u.id}
                       onClick={() => reactivate(u)} data-testid={`user-reactivate-${u.id}`}><CheckCircle2 className="w-4 h-4" /></Button>
                   ) : (
-                    <Button size="icon" variant="ghost" className="h-8 w-8" title="Suspend" disabled={busyId === u.id}
+                    <Button size="icon" variant="ghost" className="h-8 w-8" title="Suspend" disabled={locked || busyId === u.id}
                       onClick={() => suspend(u)} data-testid={`user-suspend-${u.id}`}><Ban className="w-4 h-4" /></Button>
                   )}
-                  <Button size="icon" variant="ghost" className="h-8 w-8" title="Force logout" disabled={busyId === u.id}
+                  <Button size="icon" variant="ghost" className="h-8 w-8" title="Force logout" disabled={locked || busyId === u.id}
                     onClick={() => forceLogout(u)} data-testid={`user-force-logout-${u.id}`}><LogOut className="w-4 h-4" /></Button>
-                  <Button size="icon" variant="ghost" className="h-8 w-8" title="Reset password" disabled={busyId === u.id}
+                  <Button size="icon" variant="ghost" className="h-8 w-8" title="Reset password" disabled={locked || busyId === u.id}
                     onClick={() => resetPassword(u)} data-testid={`user-reset-password-${u.id}`}><KeyRound className="w-4 h-4" /></Button>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Delete" disabled={busyId === u.id}
+                  <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Delete" disabled={locked || busyId === u.id}
                     onClick={() => deleteUser(u)} data-testid={`user-delete-${u.id}`}><Trash2 className="w-4 h-4" /></Button>
                 </div>
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
-
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-w-2xl" data-testid="user-detail-dialog">
-          <DialogHeader><DialogTitle>{detail?.user?.name}</DialogTitle></DialogHeader>
-          {loadingDetail ? (
-            <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
-          ) : (
-            <div className="space-y-5 max-h-[60vh] overflow-y-auto">
-              <div>
-                <div className="eyebrow mb-2">Enrollments ({detail?.enrollments?.length || 0})</div>
-                {(detail?.enrollments || []).map((e) => (
-                  <div key={e.id} className="flex items-center justify-between text-sm border-b border-border py-2">
-                    <span>{e.offering_title || e.offering_id}</span>
-                    <span className="text-xs text-muted-foreground">{e.progress}% · {e.source || "purchase"}</span>
-                  </div>
-                ))}
-                {!(detail?.enrollments || []).length && <p className="text-xs text-muted-foreground">No courses yet.</p>}
-              </div>
-              <div>
-                <div className="eyebrow mb-2">Payments ({detail?.payments?.length || 0})</div>
-                {(detail?.payments || []).map((p) => (
-                  <div key={p.id} className="flex items-center justify-between text-sm border-b border-border py-2">
-                    <span className="font-mono text-xs">{p.order_id}</span>
-                    <span className="text-xs text-muted-foreground">₹{p.amount_inr} · {p.status}</span>
-                  </div>
-                ))}
-                {!(detail?.payments || []).length && <p className="text-xs text-muted-foreground">No purchases yet.</p>}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {!filtered.length && users.length > 0 && (
+        <p className="text-sm text-muted-foreground text-center py-6">No users match your search.</p>
+      )}
+    </div>
     </div>
   );
 }

@@ -1,10 +1,14 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import UserDetailDialog from "@/components/admin/UserDetailDialog";
 import { toast } from "sonner";
+import { Search, Users } from "lucide-react";
 
 const FLAGS = [
   { key: "is_popular", label: "Popular" },
@@ -12,11 +16,88 @@ const FLAGS = [
   { key: "is_verified", label: "Verified" },
 ];
 
+function matches(s, q) {
+  if (!q) return true;
+  return (s.name || "").toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q);
+}
+
+/** Click-through roster for one course: recorded courses show a flat student
+ * list, live courses show it grouped by batch — same search box either way. */
+function CourseRosterDialog({ offering, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [students, setStudents] = useState([]); // recorded
+  const [batches, setBatches] = useState([]); // live: [{batch_id, batch_name, students}]
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    const isLive = offering.type === "live_course";
+    const req = isLive
+      ? api.get(`/admin/offerings/${offering.id}/batches-with-students`)
+      : api.get(`/admin/offerings/${offering.id}/students`);
+    req.then(({ data }) => {
+      if (isLive) setBatches(Array.isArray(data) ? data : []);
+      else setStudents(Array.isArray(data) ? data : []);
+    }).catch((e) => toast.error(formatApiError(e)))
+      .finally(() => setLoading(false));
+  }, [offering.id, offering.type]);
+
+  const q = search.trim().toLowerCase();
+  const isLive = offering.type === "live_course";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl" data-testid="course-roster-dialog">
+        <DialogHeader><DialogTitle>{offering.title} <span className="text-xs text-muted-foreground font-normal ml-2">{isLive ? "batch enrollment" : "enrolled students"}</span></DialogTitle></DialogHeader>
+        <div className="relative mb-2">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or email…" className="pl-9 h-10" data-testid="course-roster-search" />
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto space-y-4">
+          {loading ? (
+            <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+          ) : isLive ? (
+            batches.map((b) => {
+              const filtered = b.students.filter((s) => matches(s, q));
+              if (q && filtered.length === 0) return null;
+              return (
+                <div key={b.batch_id}>
+                  <div className="eyebrow mb-2">{b.batch_name} ({filtered.length})</div>
+                  <div className="space-y-1.5">
+                    {filtered.map((s) => (
+                      <div key={s.user_id} className="flex items-center justify-between text-sm border-b border-border py-1.5">
+                        <span>{s.name} <span className="text-xs text-muted-foreground">{s.email}</span></span>
+                        <UserDetailDialog user={{ id: s.user_id, name: s.name, role: "learner" }} />
+                      </div>
+                    ))}
+                    {filtered.length === 0 && <p className="text-xs text-muted-foreground">No students.</p>}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="space-y-1.5">
+              {students.filter((s) => matches(s, q)).map((s) => (
+                <div key={s.user_id} className="flex items-center justify-between text-sm border-b border-border py-1.5">
+                  <span>{s.name} <span className="text-xs text-muted-foreground">{s.email}</span></span>
+                  <UserDetailDialog user={{ id: s.user_id, name: s.name, role: "learner" }} />
+                </div>
+              ))}
+              {students.length === 0 && <p className="text-xs text-muted-foreground">No students enrolled.</p>}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Admin Portal — "Courses" tab: the old single-row publish toggle, plus bulk
  * select + publish/unpublish/archive, and Popular/Recommended/Verified flags. */
 export default function AdminCoursesTab({ offerings, onReload }) {
   const [selected, setSelected] = useState([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [rosterFor, setRosterFor] = useState(null);
 
   const toggleSelected = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
@@ -54,10 +135,10 @@ export default function AdminCoursesTab({ offerings, onReload }) {
       {visible.map((o) => (
         <div key={o.id} className="rounded-lg border border-border p-4 bg-card/60 flex flex-wrap items-center gap-4" data-testid={`course-row-${o.id}`}>
           <Checkbox checked={selected.includes(o.id)} onCheckedChange={() => toggleSelected(o.id)} data-testid={`course-select-${o.id}`} />
-          <div className="flex-1 min-w-[180px]">
+          <button type="button" onClick={() => setRosterFor(o)} className="flex-1 min-w-[180px] text-left hover:text-primary transition-colors" data-testid={`course-open-${o.id}`}>
             <div className="font-serif text-lg">{o.title}</div>
             <div className="text-xs text-muted-foreground">{o.subject} · {o.type.replace("_", " ")}</div>
-          </div>
+          </button>
           <Badge variant={o.approved_by_acharya ? "default" : "outline"} className="text-[10px] uppercase tracking-widest">
             {o.approved_by_acharya ? "Ācharya ✓" : "No sign-off"}
           </Badge>
@@ -71,8 +152,13 @@ export default function AdminCoursesTab({ offerings, onReload }) {
             <span className="text-xs">{o.is_published ? "Live" : "Draft"}</span>
             <Switch checked={!!o.is_published} onCheckedChange={(v) => patchOffering(o, { is_published: v })} data-testid={`publish-${o.id}`} />
           </div>
+          <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRosterFor(o)} data-testid={`course-students-${o.id}`}>
+            <Users className="w-3.5 h-3.5 mr-1.5" /> Students
+          </Button>
         </div>
       ))}
+
+      {rosterFor && <CourseRosterDialog offering={rosterFor} onClose={() => setRosterFor(null)} />}
 
       {archived.length > 0 && (
         <div>

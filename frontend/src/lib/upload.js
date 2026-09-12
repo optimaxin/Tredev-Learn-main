@@ -9,10 +9,21 @@ import api from "@/lib/api";
  * @returns {Promise<{public_url:string, path:string}>}
  */
 export async function uploadCourseMedia(file, onProgress) {
+  return uploadSigned("/storage/sign-upload", file, onProgress);
+}
+
+/**
+ * Same as uploadCourseMedia but against a different backend sign-upload endpoint
+ * (e.g. "/mantras/sign-upload") — the endpoint enforces its own size/MIME rules
+ * server-side (and via the Supabase bucket's own limits), this just sends size_bytes
+ * along so the backend can reject oversized files before signing.
+ */
+export async function uploadSigned(endpoint, file, onProgress) {
   // 1) ask the backend for a signed upload URL (service key stays server-side)
-  const { data } = await api.post("/storage/sign-upload", {
+  const { data } = await api.post(endpoint, {
     filename: file.name,
     content_type: file.type || "application/octet-stream",
+    size_bytes: file.size,
   });
 
   // 2) PUT the file straight to Supabase Storage
