@@ -1,18 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, Pause, Mic, MicOff, Gauge } from "lucide-react";
+import { Play, Pause, Gauge } from "lucide-react";
 
 /**
  * The Jewel — Shloka Player.
  * Asymmetric editorial layout:
  *  - Left: Devanagari verse + IAST + Word-by-word grammar (hover-highlight)
  *  - Right: Attributed translations + commentaries (tabs)
- *  - Bottom: Glass audio bar with playback and record-yourself (mocked mic recorder)
+ *  - Bottom: Glass audio bar with playback
  */
-// Free TTS stream — no pre-recorded audio files needed.
-function googleTtsUrl(text) {
-  return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=hi&q=${encodeURIComponent(text)}`;
-}
-
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
 function pickSanskritVoice() {
@@ -26,104 +21,50 @@ export default function ShlokaPlayer({ verse }) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [tab, setTab] = useState("translations");
-  const [recording, setRecording] = useState(false);
   const [progress, setProgress] = useState(0);
   const [repeatCount, setRepeatCount] = useState(1);
-  const audioRef = useRef(null);
-  const mediaRef = useRef(null);
   const repeatsLeftRef = useRef(0);
-  const fallenBackRef = useRef(false);
 
-  // Reset playback state and tear down audio/speech when the verse changes or unmounts.
+  // Reset playback state and cancel any in-flight speech when the verse changes or unmounts.
   useEffect(() => {
     setPlaying(false);
     setProgress(0);
     return () => {
-      audioRef.current?.pause();
-      audioRef.current = null;
       if (speechSupported) window.speechSynthesis.cancel();
     };
   }, [verse]);
 
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.playbackRate = speed;
-  }, [speed]);
-
+  // Native speechSynthesis is the only playback path — the previous unofficial Google
+  // translate_tts stream throttled unpredictably (intermittent 503s) and, on failure, briefly
+  // played back the garbled error response before falling back, which is what sounded wrong.
   const speakOnce = (text) => {
     const utter = new SpeechSynthesisUtterance(text.replace(/\n/g, ". "));
     const voice = pickSanskritVoice();
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "hi-IN";
     utter.rate = speed;
+    utter.onboundary = (e) => setProgress(text.length ? (e.charIndex / text.length) * 100 : 0);
     utter.onend = () => {
       repeatsLeftRef.current -= 1;
-      if (repeatsLeftRef.current > 0) speakOnce(text);
+      if (repeatsLeftRef.current > 0) { setProgress(0); speakOnce(text); }
       else { setPlaying(false); setProgress(0); }
     };
     utter.onerror = () => { setPlaying(false); setProgress(0); };
     window.speechSynthesis.speak(utter);
   };
 
-  // Google's translate_tts stream is an unofficial, unauthenticated endpoint that Google
-  // throttles unpredictably (observed intermittent 503s) — fall back to the browser's
-  // built-in speech synthesis so pronunciation playback still works when it does.
-  const fallbackToSpeech = (text) => {
-    if (fallenBackRef.current) return;
-    fallenBackRef.current = true;
-    audioRef.current = null;
-    if (speechSupported) speakOnce(text);
-    else { setPlaying(false); setProgress(0); }
-  };
-
-  const getAudio = (text) => {
-    if (audioRef.current) return audioRef.current;
-    const audio = new Audio(googleTtsUrl(text));
-    audio.playbackRate = speed;
-    audio.ontimeupdate = () => setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
-    audio.onended = () => {
-      repeatsLeftRef.current -= 1;
-      if (repeatsLeftRef.current > 0) {
-        audio.currentTime = 0;
-        audio.play();
-      } else {
-        setPlaying(false);
-        setProgress(0);
-      }
-    };
-    audio.onerror = () => fallbackToSpeech(text);
-    audioRef.current = audio;
-    return audio;
-  };
-
   const togglePlay = () => {
     const text = verse?.devanagari || verse?.iast;
-    if (!text) return;
+    if (!text || !speechSupported) return;
     if (playing) {
-      audioRef.current?.pause();
-      if (speechSupported) window.speechSynthesis.cancel();
+      window.speechSynthesis.cancel();
       setPlaying(false);
+      setProgress(0);
       return;
     }
-    fallenBackRef.current = false;
     repeatsLeftRef.current = Math.max(1, Math.min(20, Number(repeatCount) || 1));
-    const audio = getAudio(text);
-    audio.currentTime = 0;
-    audio.play().catch(() => fallbackToSpeech(text));
+    speakOnce(text);
     setPlaying(true);
-  };
-
-  const startRec = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      rec.start();
-      mediaRef.current = { rec, stream };
-      setRecording(true);
-    } catch { setRecording(false); }
-  };
-  const stopRec = () => {
-    try { mediaRef.current?.rec?.stop(); mediaRef.current?.stream?.getTracks().forEach(t => t.stop()); } catch {}
-    setRecording(false);
   };
 
   if (!verse) return null;
@@ -222,7 +163,7 @@ export default function ShlokaPlayer({ verse }) {
       <div className="glass border-t border-border p-4 md:p-5 flex items-center gap-4">
         <button
           onClick={togglePlay}
-          disabled={!verse?.devanagari && !verse?.iast}
+          disabled={(!verse?.devanagari && !verse?.iast) || !speechSupported}
           data-testid="shloka-play-btn"
           title="Play pronunciation"
           className="w-11 h-11 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40">
@@ -253,16 +194,6 @@ export default function ShlokaPlayer({ verse }) {
             </label>
           </div>
         </div>
-        <button
-          onClick={() => (recording ? stopRec() : startRec())}
-          data-testid="shloka-record-btn"
-          className={`w-11 h-11 rounded-full border flex items-center justify-center transition-colors ${
-            recording ? "border-primary bg-primary/10 text-primary animate-glow" : "border-border hover:border-primary/50"
-          }`}
-          title="Record yourself"
-        >
-          {recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-        </button>
       </div>
     </div>
   );

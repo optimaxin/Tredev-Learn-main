@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import SadhanaCounter from "@/components/SadhanaCounter";
 import VideoPlayer from "@/components/VideoPlayer";
 import VideoComments from "@/components/VideoComments";
-import { CheckCircle2, Circle, PlayCircle, Award, ClipboardList, Radio, Video } from "lucide-react";
+import { CheckCircle2, Circle, PlayCircle, Award, ClipboardList, Radio, Video, ScrollText, Paperclip } from "lucide-react";
 
 const certLabel = (t, status) => ({
   requested: t("courseWorkspace.certRequested"),
@@ -35,6 +35,7 @@ export default function CourseWorkspace({ offeringId }) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [sessions, setSessions] = useState([]);
   const [joiningId, setJoiningId] = useState(null);
+  const [notes, setNotes] = useState([]);
   const reportedRef = useRef(new Set()); // lesson ids already reported attended this session
 
   const load = async () => {
@@ -47,6 +48,8 @@ export default function CourseWorkspace({ offeringId }) {
     setMyCert((Array.isArray(mc.data) ? mc.data : []).find((c) => c.offering_id === offeringId && !c.revoked) || null);
     const ls = await api.get("/live-sessions/mine-learner").catch(() => ({ data: [] }));
     setSessions((Array.isArray(ls.data) ? ls.data : []).filter((s) => s.offering_id === offeringId));
+    const nt = await api.get(`/offerings/${offeringId}/notes`).catch(() => ({ data: [] }));
+    setNotes(Array.isArray(nt.data) ? nt.data : []);
     if (data.type === "sadhana") {
       const s = await api.get(`/sadhana/${offeringId}`).catch(() => null);
       if (s) setSadhana(s.data);
@@ -273,6 +276,28 @@ export default function CourseWorkspace({ offeringId }) {
             </div>
             <VideoComments offeringId={offeringId} lessonId={activeId} />
           </div>
+        </div>
+      )}
+
+      {/* Extra content & notes the Ācharya has sent directly for this course */}
+      {notes.length > 0 && (
+        <div className="mt-10 space-y-3" data-testid="course-notes">
+          <div className="eyebrow flex items-center gap-2"><ScrollText className="w-3.5 h-3.5" /> {t("courseWorkspace.notesHeading")}</div>
+          {notes.map((n) => (
+            <div key={n.id} className="rounded-xl border border-border p-4 bg-card" data-testid={`course-note-${n.id}`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{n.kind.replace("_", " ")}</Badge>
+                <span className="font-display font-semibold">{n.title}</span>
+              </div>
+              <p className="mt-2 text-sm font-editorial leading-relaxed whitespace-pre-line text-foreground/85">{n.body}</p>
+              {n.attachment_url && (
+                <a href={n.attachment_url} target="_blank" rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-primary link-underline" data-testid={`course-note-attachment-${n.id}`}>
+                  <Paperclip className="w-3 h-3" /> {n.attachment_name || t("courseWorkspace.downloadAttachment")}
+                </a>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

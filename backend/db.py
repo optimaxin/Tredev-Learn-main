@@ -31,6 +31,8 @@ COLUMNS = {
         "role": "text", "avatar_url": "text", "bio": "text", "parampara": "text",
         "created_at": "text",
         "suspended": "bool", "is_deleted": "bool", "force_logout_at": "text",
+        "phone": "text", "email_verify_required": "bool",
+        "otp_code_hash": "text", "otp_expires_at": "text",
     },
     "verses": {
         "id": "uuid", "scripture": "text", "reference": "text", "devanagari": "text",
@@ -52,7 +54,7 @@ COLUMNS = {
     "enrollments": {
         "id": "uuid", "user_id": "uuid", "offering_id": "uuid", "enrolled_at": "text",
         "progress": "int", "completed_lessons": "jsonb", "status": "text",
-        "source": "text", "granted_by": "uuid", "batch_id": "uuid",
+        "source": "text", "granted_by": "uuid", "batch_id": "uuid", "suspended": "bool",
     },
     "sadhana_progress": {
         "id": "uuid", "user_id": "uuid", "offering_id": "uuid", "sankalpa": "text",
@@ -100,6 +102,9 @@ COLUMNS = {
     "batches": {
         "id": "uuid", "offering_id": "uuid", "name": "text", "start_date": "text",
         "max_students": "int", "created_at": "text", "created_by": "uuid",
+        "timetable": "jsonb", "schedule_status": "text", "schedule_notes": "text",
+        "schedule_submitted_at": "text", "schedule_reviewed_at": "text",
+        "schedule_source_file_url": "text",
     },
     "lesson_comments": {
         "id": "uuid", "offering_id": "uuid", "lesson_id": "text", "body": "text",

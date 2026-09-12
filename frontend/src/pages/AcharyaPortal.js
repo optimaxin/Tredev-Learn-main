@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import axios from "axios";
 import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
+import { compressImage } from "@/lib/upload";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,13 +13,82 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import VideoPlayer from "@/components/VideoPlayer";
-import { CheckCircle2, XCircle, Video, Radio, ScrollText, Award, FileText, PlusCircle, BookOpen, PenLine, Stamp } from "lucide-react";
+import { CheckCircle2, XCircle, Video, Radio, ScrollText, Award, FileText, PlusCircle, BookOpen, PenLine, Stamp, CalendarClock, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
 
 const CONTENT_KINDS = [
   { value: "lecture_note", labelKey: "acharyaPortal.contentKinds.lectureNote" },
   { value: "verse_commentary", labelKey: "acharyaPortal.contentKinds.verseCommentary" },
   { value: "lesson_draft", labelKey: "acharyaPortal.contentKinds.lessonDraft" },
 ];
+
+const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+
+function mondayOf(d) {
+  const date = new Date(d);
+  const day = (date.getDay() + 6) % 7; // 0 = Monday
+  date.setDate(date.getDate() - day);
+  return date;
+}
+const isoDate = (d) => d.toISOString().slice(0, 10);
+
+/** One batch's classes, one week at a time — a batch's whole timetable can
+ * span months, so "Scheduled sessions" shows the current week by default
+ * with prev/next navigation instead of dumping every class at once. */
+function BatchWeekSchedule({ batch, onJoin }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const monday = mondayOf(new Date());
+  monday.setDate(monday.getDate() + weekOffset * 7);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get("/live-sessions/mine-acharya", {
+      params: { batch_id: batch.id, week_start: isoDate(monday), week_end: isoDate(sunday) },
+    }).then(({ data }) => setItems(Array.isArray(data) ? data : []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch.id, weekOffset]);
+
+  return (
+    <div className="rounded-2xl border border-border p-6 bg-card" data-testid={`batch-week-${batch.id}`}>
+      <div className="flex items-center gap-3 flex-wrap mb-3">
+        <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{batch.offering_title}</Badge>
+        <span className="text-xs text-muted-foreground">{batch.name}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button type="button" onClick={() => setWeekOffset((w) => w - 1)} className="p-1.5 rounded-full hover:bg-muted" aria-label="Previous week" data-testid={`batch-week-prev-${batch.id}`}>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs tabular text-muted-foreground">{monday.toLocaleDateString()} – {sunday.toLocaleDateString()}</span>
+          <button type="button" onClick={() => setWeekOffset((w) => w + 1)} className="p-1.5 rounded-full hover:bg-muted" aria-label="Next week" data-testid={`batch-week-next-${batch.id}`}>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      {loading ? (
+        <div className="text-xs text-muted-foreground">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No classes this week.</div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((s) => (
+            <div key={s.id} className="rounded-lg bg-muted/60 p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`batch-week-session-${s.id}`}>
+              <span className="font-display font-semibold">{s.title}</span>
+              <span className="text-xs text-muted-foreground tabular">{new Date(s.starts_at).toLocaleString()} · {s.duration_min} min</span>
+              {s.can_join && (
+                <Button size="sm" onClick={() => onJoin(s.id)} className="ml-auto rounded-full h-8 px-4 bg-gradient-hot text-white border-0 animate-glow" data-testid={`batch-week-join-${s.id}`}>Join now</Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AcharyaPortal() {
   const { t } = useTranslation();
@@ -31,9 +103,16 @@ export default function AcharyaPortal() {
   const [signName, setSignName] = useState({});
   const [signingId, setSigningId] = useState(null);
   const [notes, setNotes] = useState({});
+  const [rejectNotes, setRejectNotes] = useState({});
+  const [rejectingId, setRejectingId] = useState(null);
+  const [pendingSchedules, setPendingSchedules] = useState([]); // batches awaiting this acharya's timetable sign-off
+  const [approvedBatches, setApprovedBatches] = useState([]); // approved batches — Scheduled sessions shows these week-by-week, not all at once
+  const [scheduleNotes, setScheduleNotes] = useState({});
+  const [decidingScheduleId, setDecidingScheduleId] = useState(null);
   const [newContent, setNewContent] = useState({
     title: "", body: "", kind: "lecture_note", offering_id: "",
   });
+  const [attachmentFile, setAttachmentFile] = useState(null);
   const [submittingContent, setSubmittingContent] = useState(false);
 
   const load = async () => {
@@ -52,6 +131,14 @@ export default function AcharyaPortal() {
     setContentSubmissions(Array.isArray(c.data) ? c.data : []);
     setSignedCerts(Array.isArray(sc.data) ? sc.data : []);
     setPendingCerts(Array.isArray(pc.data) ? pc.data : []);
+
+    const liveCourseIds = mine.filter((x) => x.type === "live_course").map((x) => x.id);
+    const batchLists = await Promise.all(
+      liveCourseIds.map((id) => api.get("/batches", { params: { offering_id: id } }).catch(() => ({ data: [] })))
+    );
+    const allBatches = batchLists.flatMap((r, i) => (Array.isArray(r.data) ? r.data : []).map((b) => ({ ...b, offering_title: mine.find((x) => x.id === liveCourseIds[i])?.title })));
+    setPendingSchedules(allBatches.filter((b) => b.schedule_status === "pending_approval"));
+    setApprovedBatches(allBatches.filter((b) => b.schedule_status === "approved"));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (user) load(); }, [user?.id]);
@@ -64,14 +151,37 @@ export default function AcharyaPortal() {
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
+  const decideSchedule = async (batchId, approvedVal) => {
+    setDecidingScheduleId(batchId);
+    try {
+      await api.post(`/batches/${batchId}/schedule-approval`, { approved: approvedVal, notes: scheduleNotes[batchId] || "" });
+      toast.success(approvedVal ? t("acharyaPortal.timetableApprovedToast") : t("acharyaPortal.timetableSentBackToast"));
+      load();
+    } catch (e) { toast.error(formatApiError(e)); }
+    setDecidingScheduleId(null);
+  };
+
   const submitContent = async (e) => {
     e.preventDefault();
     if (!newContent.title.trim() || !newContent.body.trim()) return toast.error(t("acharyaPortal.titleBodyRequired"));
+    if (attachmentFile && attachmentFile.size > ATTACHMENT_MAX_BYTES) return toast.error(t("acharyaPortal.attachmentTooLarge"));
     setSubmittingContent(true);
     try {
-      await api.post("/acharya/content", newContent);
+      let payload = { ...newContent };
+      if (attachmentFile) {
+        // Images compress client-side (fewer bytes over the wire); PDFs/DOCX are
+        // already compressed containers, so they upload as-is — no data loss either way.
+        const toUpload = attachmentFile.type.startsWith("image/") ? await compressImage(attachmentFile) : attachmentFile;
+        const { data: signed } = await api.post("/acharya/content/sign-upload", {
+          filename: toUpload.name, content_type: toUpload.type, size_bytes: toUpload.size,
+        });
+        await axios.put(signed.upload_url, toUpload, { headers: { "Content-Type": toUpload.type } });
+        payload = { ...payload, attachment_url: signed.public_url, attachment_name: signed.filename, attachment_size: toUpload.size };
+      }
+      await api.post("/acharya/content", payload);
       toast.success(t("acharyaPortal.submittedToast"));
       setNewContent({ title: "", body: "", kind: "lecture_note", offering_id: "" });
+      setAttachmentFile(null);
       load();
     } catch (err) { toast.error(formatApiError(err)); }
     setSubmittingContent(false);
@@ -97,6 +207,18 @@ export default function AcharyaPortal() {
     setSigningId(null);
   };
 
+  const rejectCert = async (c) => {
+    const note = (rejectNotes[c.code] || "").trim();
+    if (!note) return toast.error(t("acharyaPortal.rejectReasonRequired"));
+    setRejectingId(c.code);
+    try {
+      await api.post(`/certificates/${c.code}/reject`, { note });
+      toast.success(t("acharyaPortal.rejectedToast"));
+      load();
+    } catch (e) { toast.error(formatApiError(e)); }
+    setRejectingId(null);
+  };
+
   return (
     <div className="site-container py-16">
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">{t("acharyaPortal.badge")}</div>
@@ -116,6 +238,42 @@ export default function AcharyaPortal() {
 
         {/* APPROVAL QUEUE */}
         <TabsContent value="approvals" className="mt-8 space-y-4">
+          {/* Batch timetables — staff uploads a class schedule per batch before scheduling any session */}
+          <div className="space-y-3">
+            <div className="eyebrow flex items-center gap-2"><CalendarClock className="w-3.5 h-3.5" /> {t("acharyaPortal.timetablesHeading")} ({pendingSchedules.length})</div>
+            {pendingSchedules.length === 0 && <div className="text-muted-foreground text-sm">{t("acharyaPortal.noTimetablesPending")}</div>}
+            {pendingSchedules.map((b) => (
+              <div key={b.id} className="rounded-2xl border border-border p-6 bg-card" data-testid={`schedule-approval-${b.id}`}>
+                <div className="flex items-baseline gap-3 mb-2">
+                  <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{b.offering_title}</Badge>
+                  <span className="text-xs text-muted-foreground">{t("acharyaPortal.timetableFor", { batch: b.name })}</span>
+                </div>
+                <div className="space-y-2 mt-3">
+                  {(b.timetable || []).map((slot, i) => (
+                    <div key={i} className="rounded-lg bg-muted/60 p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="font-display font-semibold">{slot.title}</span>
+                      <span className="text-xs text-muted-foreground tabular">{new Date(slot.starts_at).toLocaleString()} · {slot.duration_min} min</span>
+                      {slot.topic && <span className="text-xs text-muted-foreground italic">{slot.topic}</span>}
+                    </div>
+                  ))}
+                </div>
+                <Textarea placeholder={t("acharyaPortal.feedbackPlaceholder")} value={scheduleNotes[b.id] || ""}
+                  onChange={(e) => setScheduleNotes({ ...scheduleNotes, [b.id]: e.target.value })}
+                  data-testid={`schedule-notes-${b.id}`} className="mt-4" />
+                <div className="mt-4 flex gap-3">
+                  <Button onClick={() => decideSchedule(b.id, true)} disabled={decidingScheduleId === b.id} data-testid={`schedule-approve-${b.id}`} className="rounded-full bg-gradient-hot text-white border-0">
+                    <CheckCircle2 className="w-4 h-4 mr-2"/>{t("acharyaPortal.approveTimetable")}
+                  </Button>
+                  <Button onClick={() => { if (!(scheduleNotes[b.id] || "").trim()) return toast.error(t("acharyaPortal.addFeedbackRequired")); decideSchedule(b.id, false); }}
+                    disabled={decidingScheduleId === b.id} data-testid={`schedule-reject-${b.id}`} variant="outline" className="rounded-full">
+                    <XCircle className="w-4 h-4 mr-2"/>{t("acharyaPortal.requestTimetableChanges")}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="eyebrow pt-2">{t("acharyaPortal.coursesHeading")}</div>
           {pending.length === 0 && <div className="text-muted-foreground text-sm">{t("acharyaPortal.nothingAwaitingSignoff")}</div>}
           {pending.map((o) => (
             <div key={o.id} className="rounded-2xl border border-border p-6 bg-card" data-testid={`approval-${o.id}`}>
@@ -200,6 +358,16 @@ export default function AcharyaPortal() {
                   data-testid="acharya-content-body" className="mt-2 min-h-[220px] font-editorial"
                   placeholder={t("acharyaPortal.bodyPlaceholder")} />
               </div>
+              <div>
+                <label className="eyebrow flex items-center gap-1"><Paperclip className="w-3 h-3"/> {t("acharyaPortal.attachment")}</label>
+                <Input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,image/png,image/jpeg"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    if (f && f.size > ATTACHMENT_MAX_BYTES) { toast.error(t("acharyaPortal.attachmentTooLarge")); e.target.value = ""; return; }
+                    setAttachmentFile(f);
+                  }}
+                  data-testid="acharya-content-attachment" className="mt-2" />
+              </div>
               <Button type="submit" disabled={submittingContent} data-testid="acharya-content-submit"
                 className="rounded-full h-11 px-8 bg-gradient-hot text-white border-0">
                 {submittingContent ? t("acharyaPortal.submitting") : t("acharyaPortal.submitForReview")}
@@ -225,6 +393,11 @@ export default function AcharyaPortal() {
               </div>
               <div className="font-display font-semibold text-lg mt-2">{c.title}</div>
               <p className="text-sm text-muted-foreground mt-2 line-clamp-3">{c.body}</p>
+              {c.attachment_url && (
+                <a href={c.attachment_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-primary link-underline" data-testid={`content-attachment-${c.id}`}>
+                  <Paperclip className="w-3 h-3" /> {c.attachment_name || t("acharyaPortal.viewAttachment")}
+                </a>
+              )}
               {c.review_notes && (
                 <div className="mt-3 rounded-lg bg-muted p-3 text-xs">
                   <span className="uppercase tracking-widest text-[9px] text-muted-foreground">{t("acharyaPortal.reviewersNotes")}: </span>
@@ -235,31 +408,47 @@ export default function AcharyaPortal() {
           ))}
         </TabsContent>
 
-        {/* SCHEDULED SESSIONS */}
-        <TabsContent value="sessions" className="mt-8">
-          <p className="text-sm text-muted-foreground mb-5">{t("acharyaPortal.sessionsSubtext")}</p>
-          <div className="space-y-3">
-            {sessions.map((s) => (
-              <div key={s.id} className="rounded-xl border border-border p-5 bg-card flex items-center gap-4" data-testid={`acharya-session-${s.id}`}>
-                <div className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center text-primary">
-                  {s.mode === "broadcast" ? <Radio className="w-5 h-5" /> : <Video className="w-5 h-5" />}
-                </div>
-                <div className="flex-1">
-                  <div className="font-display font-semibold text-lg">{s.title}</div>
-                  <div className="text-xs text-muted-foreground tabular">
-                    {new Date(s.starts_at).toLocaleString()} · {s.duration_min} min · {s.mode}
+        {/* SCHEDULED SESSIONS — batch-wise, one week at a time per batch;
+            standalone (non-batch) sessions listed separately below since a
+            week window doesn't apply to those. */}
+        <TabsContent value="sessions" className="mt-8 space-y-6">
+          <p className="text-sm text-muted-foreground">{t("acharyaPortal.sessionsSubtext")}</p>
+
+          {approvedBatches.length > 0 && (
+            <div className="space-y-3">
+              {approvedBatches.map((b) => <BatchWeekSchedule key={b.id} batch={b} onJoin={joinSession} />)}
+            </div>
+          )}
+
+          {(() => {
+            const standalone = sessions.filter((s) => !s.batch_id);
+            if (approvedBatches.length > 0 && standalone.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                {approvedBatches.length > 0 && <div className="eyebrow">Other sessions</div>}
+                {standalone.map((s) => (
+                  <div key={s.id} className="rounded-xl border border-border p-5 bg-card flex items-center gap-4" data-testid={`acharya-session-${s.id}`}>
+                    <div className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center text-primary">
+                      {s.mode === "broadcast" ? <Radio className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-display font-semibold text-lg">{s.title}</div>
+                      <div className="text-xs text-muted-foreground tabular">
+                        {new Date(s.starts_at).toLocaleString()} · {s.duration_min} min · {s.mode}
+                      </div>
+                      {s.offering_title && <div className="text-xs text-primary mt-1">{s.offering_title}</div>}
+                    </div>
+                    {s.can_join ? (
+                      <Button onClick={()=>joinSession(s.id)} className="rounded-full px-6 bg-gradient-hot text-white border-0 animate-glow" data-testid={`acharya-join-${s.id}`}>{t("acharyaPortal.joinNow")}</Button>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{t("acharyaPortal.opensBefore")}</Badge>
+                    )}
                   </div>
-                  {s.offering_title && <div className="text-xs text-primary mt-1">{s.offering_title}</div>}
-                </div>
-                {s.can_join ? (
-                  <Button onClick={()=>joinSession(s.id)} className="rounded-full px-6 bg-gradient-hot text-white border-0 animate-glow" data-testid={`acharya-join-${s.id}`}>{t("acharyaPortal.joinNow")}</Button>
-                ) : (
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-widest">{t("acharyaPortal.opensBefore")}</Badge>
-                )}
+                ))}
+                {standalone.length === 0 && <div className="text-sm text-muted-foreground">{t("acharyaPortal.noSessionsScheduled")}</div>}
               </div>
-            ))}
-            {sessions.length === 0 && <div className="text-sm text-muted-foreground">{t("acharyaPortal.noSessionsScheduled")}</div>}
-          </div>
+            );
+          })()}
         </TabsContent>
 
         {/* PUBLISHED */}
@@ -270,7 +459,12 @@ export default function AcharyaPortal() {
                 <div className="font-display font-semibold text-lg">{o.title}</div>
                 <div className="text-xs text-muted-foreground">{o.subject} · {o.type.replace("_"," ")}</div>
               </div>
-              <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest">{t("acharyaPortal.signedOff")}</Badge>
+              <div className="flex items-center gap-3">
+                <Link to={`/courses/${o.id}`} className="text-sm link-underline text-primary" data-testid={`acharya-view-course-${o.id}`}>
+                  {t("acharyaPortal.viewCourse")} →
+                </Link>
+                <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest">{t("acharyaPortal.signedOff")}</Badge>
+              </div>
             </div>
           ))}
           {approved.length === 0 && <div className="text-sm text-muted-foreground">{t("acharyaPortal.noCoursesPublished")}</div>}
@@ -296,12 +490,24 @@ export default function AcharyaPortal() {
                   <Input value={signName[c.code] ?? user?.name ?? ""} onChange={(e)=>setSignName({...signName, [c.code]: e.target.value})}
                     data-testid={`sign-name-${c.code}`} className="mt-2 h-11 font-editorial italic" />
                 </div>
-                <Button onClick={()=>signCert(c)} disabled={signingId===c.code} data-testid={`sign-submit-${c.code}`}
+                <Button onClick={()=>signCert(c)} disabled={signingId===c.code || rejectingId===c.code} data-testid={`sign-submit-${c.code}`}
                   className="rounded-full h-11 px-6 bg-gradient-hot text-white border-0">
                   <Stamp className="w-4 h-4 mr-2"/>{signingId===c.code ? t("acharyaPortal.signing") : t("acharyaPortal.signAndCertify")}
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground mt-2">{t("acharyaPortal.signCertifyDisclaimer")}</p>
+
+              <div className="mt-4 grid sm:grid-cols-[1fr_auto] gap-3 items-end border-t border-border pt-4">
+                <div>
+                  <label className="eyebrow flex items-center gap-1"><XCircle className="w-3 h-3"/> {t("acharyaPortal.reject")}</label>
+                  <Textarea value={rejectNotes[c.code] ?? ""} onChange={(e)=>setRejectNotes({...rejectNotes, [c.code]: e.target.value})}
+                    placeholder={t("acharyaPortal.rejectReasonPlaceholder")} data-testid={`reject-note-${c.code}`} className="mt-2 min-h-[44px]" />
+                </div>
+                <Button onClick={()=>rejectCert(c)} disabled={rejectingId===c.code || signingId===c.code} variant="outline"
+                  data-testid={`reject-submit-${c.code}`} className="rounded-full h-11 px-6 text-destructive border-destructive/40 hover:bg-destructive/10">
+                  <XCircle className="w-4 h-4 mr-2"/>{rejectingId===c.code ? t("acharyaPortal.rejecting") : t("acharyaPortal.reject")}
+                </Button>
+              </div>
             </div>
           ))}
         </TabsContent>

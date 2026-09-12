@@ -5,12 +5,15 @@ import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import ShlokaPlayer from "@/components/ShlokaPlayer";
-import { BookOpen, Award, GraduationCap, Users, CalendarDays } from "lucide-react";
+import { BookOpen, Award, GraduationCap, Users, CalendarDays, PartyPopper } from "lucide-react";
 import { localized } from "@/lib/utils";
 import { useCurrency, formatPrice } from "@/context/CurrencyContext";
+
+const STAFF_FREE_ACCESS_ROLES = ["academic_staff", "admin", "super_admin"];
 
 export default function CourseDetail() {
   const { t, i18n } = useTranslation();
@@ -27,20 +30,34 @@ export default function CourseDetail() {
   const [couponCode, setCouponCode] = useState("");
   const [batches, setBatches] = useState([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
+  const [successInfo, setSuccessInfo] = useState(null);
 
   const load = async () => {
     const { data } = await api.get(`/offerings/${id}`);
     setOffering(data);
+    let liveBatches = [];
     if (data.type === "live_course") {
       const { data: b } = await api.get("/batches", { params: { offering_id: id } }).catch(() => ({ data: [] }));
-      const list = Array.isArray(b) ? b : [];
-      setBatches(list);
-      setSelectedBatchId((prev) => prev || list.find((x) => (x.seats_available ?? 0) > 0)?.id || "");
+      liveBatches = Array.isArray(b) ? b : [];
+      setBatches(liveBatches);
+      setSelectedBatchId((prev) => prev || liveBatches.find((x) => (x.seats_available ?? 0) > 0)?.id || "");
     }
     if (user) {
       try {
         const my = await api.get("/enrollments/mine");
-        setEnrolled(!!(Array.isArray(my.data) ? my.data : []).find((e) => e.offering_id === id));
+        const already = !!(Array.isArray(my.data) ? my.data : []).find((e) => e.offering_id === id);
+        setEnrolled(already);
+        // The assigned Ācharya gets free, un-gated access to their own course —
+        // no payment, no batch pick required. Staff/admin get every course free.
+        const isFreeAccessRole = user.role === "acharya" ? data.acharya_id === user.id
+          : STAFF_FREE_ACCESS_ROLES.includes(user.role);
+        if (!already && isFreeAccessRole) {
+          const batchId = data.type === "live_course" ? liveBatches[0]?.id : undefined;
+          if (data.type !== "live_course" || batchId) {
+            await api.post("/enrollments", { offering_id: id, batch_id: batchId }).catch(() => {});
+            setEnrolled(true);
+          }
+        }
       } catch {}
     }
   };
@@ -55,8 +72,8 @@ export default function CourseDetail() {
     if (!orderId || !user) return;
     api.get(`/payments/${orderId}/status`).then(({ data }) => {
       if (data.status === "paid") {
-        toast.success(t("courseDetail.enrolledToast"));
         setEnrolled(true);
+        setSuccessInfo({ amountInr: data.amount_inr || 0, orderId });
         load();
       } else if (data.status === "failed") {
         toast.error(t("courseDetail.paymentFailed"));
@@ -72,13 +89,15 @@ export default function CourseDetail() {
 
   const isLiveCourse = offering?.type === "live_course";
   const hasOpenBatch = batches.some((b) => (b.seats_available ?? 0) > 0);
+  const isOwnAcharya = user?.role === "acharya" && offering?.acharya_id === user?.id;
+  const canView = enrolled || isOwnAcharya;
 
   const enroll = async () => {
     if (!user) return nav("/login", { state: { from: `/courses/${id}` } });
     if (isLiveCourse && !selectedBatchId) return toast.error(t("courseDetail.selectBatchFirst"));
     setEnrolling(true);
     try {
-      if (offering.price_inr > 0) {
+      if (offering.price_inr > 0 && !STAFF_FREE_ACCESS_ROLES.includes(user.role)) {
         const { data } = await api.post("/payments/cashfree/create-order", {
           offering_id: id, coupon_code: couponCode.trim() || undefined,
           batch_id: isLiveCourse ? selectedBatchId : undefined,
@@ -90,8 +109,8 @@ export default function CourseDetail() {
         return; // browser navigates away to checkout; nothing left to do here
       }
       await api.post("/enrollments", { offering_id: id, batch_id: isLiveCourse ? selectedBatchId : undefined });
-      toast.success(t("courseDetail.enrolledToast"));
       setEnrolled(true);
+      setSuccessInfo({ amountInr: 0 });
       load();
     } catch (e) { toast.error(formatApiError(e)); }
     setEnrolling(false);
@@ -125,7 +144,7 @@ export default function CourseDetail() {
             {offering.subtitle && <p className="mt-3 text-xl font-serif italic text-primary">{localized(offering, "subtitle", lang)}</p>}
             <p className="mt-6 text-lg text-foreground/80 leading-relaxed">{localized(offering, "description", lang)}</p>
             <div className="mt-10 flex flex-wrap items-center gap-5">
-              {enrolled ? (
+              {canView ? (
                 <Button size="lg" variant="outline" disabled className="rounded-full px-8 h-12" data-testid="enroll-status">{t("courseDetail.enrolledBtn")}</Button>
               ) : (
                 <Button size="lg" onClick={enroll} disabled={enrolling || (isLiveCourse && !hasOpenBatch)} data-testid="enroll-btn" className="rounded-full px-8 h-12">
@@ -145,7 +164,7 @@ export default function CourseDetail() {
               )}
             </div>
 
-            {isLiveCourse && !enrolled && (
+            {isLiveCourse && !canView && (
               <div className="mt-6 max-w-md" data-testid="batch-picker">
                 <div className="eyebrow mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> {t("courseDetail.chooseBatch")}</div>
                 {batches.length === 0 ? (
@@ -179,14 +198,14 @@ export default function CourseDetail() {
                 )}
               </div>
             )}
-            {price > 0 && !enrolled && (
+            {price > 0 && !canView && (
               <div className="mt-4 flex items-center gap-2 max-w-xs">
                 <span className="text-xs text-muted-foreground shrink-0">{t("courseDetail.haveCoupon")}</span>
                 <Input value={couponCode} onChange={(e) => setCouponCode(e.target.value)}
                   placeholder={t("courseDetail.couponPlaceholder")} className="h-8 text-xs" data-testid="coupon-code-input" />
               </div>
             )}
-            {price > 0 && (
+            {price > 0 && !canView && (
               <div className="mt-4 text-xs text-muted-foreground">{t("courseDetail.mockedNotice")}</div>
             )}
           </div>
@@ -194,7 +213,7 @@ export default function CourseDetail() {
       </section>
 
       <section className="site-container py-16">
-        {enrolled ? (
+        {canView ? (
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-10 text-center max-w-2xl mx-auto">
             <GraduationCap className="w-8 h-8 mx-auto text-primary mb-3" />
             <p className="text-sm text-foreground/80 mb-5">
@@ -254,6 +273,40 @@ export default function CourseDetail() {
           </div>
         )}
       </section>
+
+      <Dialog open={!!successInfo} onOpenChange={(o) => !o && setSuccessInfo(null)}>
+        <DialogContent className="max-w-md text-center" data-testid="enroll-success-dialog">
+          <div className="py-4">
+            <PartyPopper className="w-12 h-12 mx-auto text-primary mb-4" />
+            <h2 className="text-2xl font-serif mb-2">{t("courseDetail.successTitle")}</h2>
+            <p className="text-sm text-muted-foreground mb-1">{localized(offering, "title", lang)}</p>
+            <p className="text-sm text-foreground/80 mt-3">
+              {successInfo?.amountInr > 0
+                ? t("courseDetail.successPaidBody", { title: localized(offering, "title", lang) })
+                : t("courseDetail.successFreeBody", { title: localized(offering, "title", lang) })}
+            </p>
+            {successInfo?.amountInr > 0 && (
+              <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-border px-4 py-1.5 text-sm">
+                <span className="text-muted-foreground">{t("courseDetail.successAmountPaid")}</span>
+                <span className="font-serif">₹{successInfo.amountInr}</span>
+              </div>
+            )}
+            {successInfo?.orderId && (
+              <div className="mt-4 rounded-lg border border-border bg-muted/30 px-4 py-3 text-left" data-testid="success-order-id">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{t("courseDetail.successOrderId")}</span>
+                  <span className="font-mono text-xs">{successInfo.orderId}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-2">{t("courseDetail.successScreenshotNote")}</p>
+              </div>
+            )}
+            <Button className="w-full rounded-full h-12 mt-6" data-testid="success-go-to-dashboard"
+              onClick={() => { setSuccessInfo(null); nav("/learner"); }}>
+              {t("courseDetail.successGoToDashboard")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

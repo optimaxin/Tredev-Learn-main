@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Clock, Zap, CheckCircle2, X, Calendar, Video, HelpCircle, Trophy } from "lucide-react";
 import { toast } from "sonner";
+
+const STAFF_FREE_ACCESS_ROLES = ["academic_staff", "admin", "super_admin"];
 
 function Countdown({ startsInSeconds }) {
   const { t } = useTranslation();
@@ -39,6 +41,7 @@ export default function Events() {
   const [quizzes, setQuizzes] = useState([]);
   const { user } = useAuth();
   const nav = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const loadWebinars = () => api.get("/webinars").then((r) => setWebinars(Array.isArray(r.data) ? r.data : [])).catch(() => setWebinars([]));
   const loadRegs = () => user
@@ -54,10 +57,40 @@ export default function Events() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadRegs(); }, [user?.id]);
 
+  // Cashfree redirects back here as /events?order_id=... after checkout —
+  // reconcile via the status endpoint rather than trusting the redirect alone.
+  useEffect(() => {
+    const orderId = searchParams.get("order_id");
+    if (!orderId || !user) return;
+    api.get(`/payments/${orderId}/status`).then(({ data }) => {
+      if (data.status === "paid") {
+        setConfirm({ payment_id: data.order_id, webinar: data.webinar, join_url: data.join_url, note: "" });
+        loadRegs();
+        loadWebinars();
+      } else if (data.status === "failed") {
+        toast.error(t("events.paymentFailed"));
+      } else {
+        toast.info(t("events.paymentPending"));
+      }
+    }).catch(() => {}).finally(() => {
+      searchParams.delete("order_id");
+      setSearchParams(searchParams, { replace: true });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const register = async (w) => {
     if (!user) return nav("/login", { state: { from: "/events" } });
     setRegistering(w.id);
     try {
+      if (w.price_inr > 0 && !STAFF_FREE_ACCESS_ROLES.includes(user.role)) {
+        const { data } = await api.post("/payments/cashfree/create-webinar-order", { webinar_id: w.id });
+        // ponytail: "sandbox" hardcoded for the test phase, matches CourseDetail.js —
+        // switch to "production" here alongside flipping CASHFREE_ENV on the backend.
+        const cashfree = window.Cashfree({ mode: "sandbox" });
+        cashfree.checkout({ paymentSessionId: data.payment_session_id, redirectTarget: "_self" });
+        return; // browser navigates away to checkout; nothing left to do here
+      }
       const { data } = await api.post(`/webinars/${w.id}/register`);
       setConfirm(data);
       setRegistered((s) => new Set(s).add(w.id));
@@ -180,6 +213,9 @@ export default function Events() {
                 <span className="text-muted-foreground">{t("events.amount")}</span>
                 <span className="tabular">{confirm.webinar?.price_inr ? `₹${confirm.webinar.price_inr}` : t("events.free")}</span>
               </div>
+              {confirm.payment_id && confirm.webinar?.price_inr > 0 && (
+                <p className="text-[11px] text-muted-foreground border-t border-border pt-3">{t("events.screenshotNote")}</p>
+              )}
               <p className="text-[10px] text-muted-foreground">{confirm.note}</p>
             </div>
 

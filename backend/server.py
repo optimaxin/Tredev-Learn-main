@@ -28,14 +28,15 @@ from translate import auto_translate
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Any, Dict
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File
 from starlette.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 
 import db as dbmod
 from db import db
 import firebase_auth
 from firebase_auth import AuthError
+import otp_auth
 
 # ==================== SETUP ====================
 # Postgres (Supabase) connection string; pool is created on startup.
@@ -46,6 +47,12 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 COURSE_MEDIA_BUCKET = os.environ.get("COURSE_MEDIA_BUCKET", "course-media")
 CHAT_MEDIA_BUCKET = os.environ.get("CHAT_MEDIA_BUCKET", "chat-media")
+ACHARYA_MEDIA_BUCKET = os.environ.get("ACHARYA_MEDIA_BUCKET", "acharya-content")
+MANTRA_AUDIO_BUCKET = os.environ.get("MANTRA_AUDIO_BUCKET", "mantra-audio")
+MANTRA_AUDIO_MAX_BYTES = 2 * 1024 * 1024
+BATCH_SCHEDULE_BUCKET = os.environ.get("BATCH_SCHEDULE_BUCKET", "batch-schedules")
+BATCH_SCHEDULE_MAX_BYTES = 5 * 1024 * 1024
+ACHARYA_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024
 
 # Bunny Stream (lecture video hosting) — a per-video TUS upload signature is handed
 # to the browser so the real API key never leaves the server.
@@ -88,6 +95,8 @@ def sanitize_user(u: dict) -> dict:
     u["id"] = str(u.get("_id", u.get("id", "")))
     u.pop("_id", None)
     u.pop("password_hash", None)
+    u.pop("otp_code_hash", None)
+    u.pop("otp_expires_at", None)
     # dates to iso if datetime
     for k, v in list(u.items()):
         if isinstance(v, datetime):
@@ -143,6 +152,12 @@ def require_role(*roles):
     return checker
 
 
+# Staff/admin roles get every course and webinar free, so they can preview and
+# support content without paying — their enrollments/registrations must never
+# create a payment record, since the revenue dashboard sums only db.payments.
+STAFF_FREE_ACCESS_ROLES = ("academic_staff", "admin", "super_admin")
+
+
 def require_feature(key: str):
     async def checker():
         toggle = await db.feature_toggles.find_one({"key": key})
@@ -192,12 +207,52 @@ async def write_audit(actor: dict, action: str, target: str = "", meta: dict = N
     })
 
 
+# ponytail: static list, not an exhaustive/updating disposable-domain feed —
+# upgrade to the `disposable-email-domains` PyPI package (or an API like
+# Kickbox) if fake signups keep slipping through with new domains.
+DISPOSABLE_EMAIL_DOMAINS = {
+    "crybio.com", "mailinator.com", "guerrillamail.com", "guerrillamail.info",
+    "guerrillamail.biz", "guerrillamail.de", "guerrillamail.net", "guerrillamail.org",
+    "sharklasers.com", "10minutemail.com", "10minutemail.net", "20minutemail.com",
+    "tempmail.com", "temp-mail.org", "tempmail.net", "tempmailo.com", "tempmail.dev",
+    "throwawaymail.com", "trashmail.com", "trashmail.net", "dispostable.com",
+    "yopmail.com", "yopmail.net", "yopmail.fr", "getnada.com", "moakt.com",
+    "mailnesia.com", "mailcatch.com", "maildrop.cc", "mintemail.com", "fakeinbox.com",
+    "spamgourmet.com", "mytemp.email", "emailondeck.com", "mailsac.com",
+    "einrot.com", "mohmal.com", "mohmal.im", "mohmal.tech", "harakirimail.com",
+    "burnermail.io", "tempinbox.com", "discard.email", "discardmail.com",
+    "spambog.com", "spam4.me", "throwam.com", "mail-temporaire.fr", "tempr.email",
+    "inboxbear.com", "luxusmail.org", "correotemporal.org", "nada.email",
+}
+
+
+def _is_disposable_email(email: str) -> bool:
+    domain = email.rsplit("@", 1)[-1].lower()
+    return domain in DISPOSABLE_EMAIL_DOMAINS
+
+
 # ==================== MODELS ====================
 class RegisterIn(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=6)
-    name: str
+    password: str = Field(min_length=8)
+    # Optional: the redesigned signup flow asks for the name *after* OTP
+    # verification, so register() only has email+password up front.
+    name: Optional[str] = None
     role: Optional[str] = "learner"  # only learner allowed via public register
+
+    @field_validator("email")
+    @classmethod
+    def email_not_disposable(cls, v: str) -> str:
+        if _is_disposable_email(str(v)):
+            raise ValueError("Temporary/disposable email addresses are not allowed. Please use a permanent email address.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
+            raise ValueError("Password must be at least 8 characters and include a letter and a number")
+        return v
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -205,6 +260,25 @@ class LoginIn(BaseModel):
 
 class GoogleLoginIn(BaseModel):
     id_token: str
+
+class PhoneLoginIn(BaseModel):
+    # Phone sign-in also hands us a verified Firebase ID token (Firebase's Phone
+    # Auth SDK owns sending/checking the SMS OTP).
+    id_token: str
+    # Only sent by the signup flow, right after the SMS code is confirmed —
+    # phone accounts have no email/name from Firebase, so we ask once here.
+    # Ignored for an already-existing user (a plain phone sign-in).
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+class CompleteProfileIn(BaseModel):
+    # One-time onboarding step, called right after email OTP verification.
+    name: str
+    phone: Optional[str] = None
+
+class VerifyOtpIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
 
 class ConsultationIn(BaseModel):
     name: str
@@ -257,6 +331,9 @@ class BatchUpdateIn(BaseModel):
     name: Optional[str] = None
     start_date: Optional[str] = None
     max_students: Optional[int] = None
+
+class BatchTimetableIn(BaseModel):
+    items: List[dict] = []  # [{title, starts_at, duration_min, mode, topic}] — proposed class slots
 
 class VerseIn(BaseModel):
     scripture: str  # Bhagavad Gita, Rigveda, etc
@@ -334,10 +411,18 @@ class AcharyaContentIn(BaseModel):
     offering_id: Optional[str] = ""
     kind: str = "lecture_note"  # lecture_note, verse_commentary, lesson_draft
     verse_id: Optional[str] = ""
+    attachment_url: Optional[str] = ""
+    attachment_name: Optional[str] = ""
+    attachment_size: Optional[int] = 0
 
 class AcharyaContentReviewIn(BaseModel):
     approved: bool
     notes: Optional[str] = ""
+
+class AcharyaAttachmentSignIn(BaseModel):
+    filename: str
+    content_type: Optional[str] = "application/octet-stream"
+    size_bytes: int = 0
 
 class LiveSessionCreateIn(BaseModel):
     title: str
@@ -384,6 +469,9 @@ class CertificateIssueIn(BaseModel):
 
 class CertificateSignIn(BaseModel):
     signature_name: str
+
+class CertificateRejectIn(BaseModel):
+    note: str
 
 class SignUploadIn(BaseModel):
     filename: str
@@ -458,18 +546,90 @@ async def register(data: RegisterIn, response: Response):
     doc = {
         "firebase_uid": fb_uid,
         "email": email,
-        "name": data.name,
+        # Real name comes later via /auth/complete-profile, right after OTP verify.
+        "name": data.name or email.split("@")[0],
         "role": role,
         "created_at": now_utc().isoformat(),
         "avatar_url": "",
         "bio": "",
         "parampara": "",
+        # New signups must verify their email before they can log in — existing
+        # rows default to False (via schema.sql) so they're never retroactively locked out.
+        "email_verify_required": True,
     }
     result = await db.users.insert_one(doc)
     doc["_id"] = result.inserted_id
-    response.set_cookie("access_token", token, httponly=True, secure=False,
-                        samesite="lax", max_age=7*24*3600, path="/")
-    return {"user": sanitize_user(doc), "token": token}
+    email_sent = await _send_otp(doc["_id"], email)
+    # No session cookie yet — the account only becomes usable once the code is verified.
+    return {"user": sanitize_user(doc), "email_verification_sent": email_sent}
+
+
+async def _send_otp(user_id, email: str) -> bool:
+    """Generate a fresh 6-digit OTP, store its hash on the user row, and email
+    it. Returns whether the email actually sent (callers must not claim
+    success when it didn't — that's how the old Firebase-link flow went
+    unnoticed for weeks while its emails silently failed to arrive)."""
+    code = otp_auth.generate_code()
+    await db.users.update_one({"_id": user_id}, {"$set": {
+        "otp_code_hash": otp_auth.hash_code(code),
+        "otp_expires_at": otp_auth.expiry_timestamp(),
+    }})
+    try:
+        await otp_auth.send_code_email(email, code)
+        return True
+    except otp_auth.OtpSendError as e:
+        logger.warning(f"Could not send OTP email to {email}: {e.message}")
+        return False
+
+
+@api_router.post("/auth/resend-verification")
+async def resend_verification(data: LoginIn):
+    """Re-send the verification code. Requires the password (same as login) so this
+    can't be used to spam an arbitrary stranger's inbox."""
+    email = data.email.lower()
+    try:
+        fb_uid, _ = await firebase_auth.sign_in(email, data.password)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    user = await db.users.find_one({"firebase_uid": fb_uid})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    email_sent = await _send_otp(user["_id"], email)
+    return {"email_verification_sent": email_sent}
+
+
+@api_router.post("/auth/verify-otp")
+async def verify_otp(data: VerifyOtpIn, response: Response):
+    """Confirm the 6-digit code emailed by /auth/register or /auth/resend-verification,
+    then log the user straight in (no separate login call needed)."""
+    email = data.email.lower()
+    user = await db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if (otp_auth.is_expired(user.get("otp_expires_at"))
+            or not user.get("otp_code_hash")
+            or user["otp_code_hash"] != otp_auth.hash_code(data.code)):
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {
+        "email_verify_required": False, "otp_code_hash": None, "otp_expires_at": None,
+    }})
+    # Frontend still holds the password from the registration form and calls
+    # /auth/login right after this to actually establish the session cookie.
+    return {"verified": True}
+
+
+@api_router.post("/auth/complete-profile")
+async def complete_profile(data: CompleteProfileIn, user: dict = Depends(get_current_user)):
+    """Onboarding-only: fills in the name (+ optional phone) collected right
+    after email OTP verification. Unlike PATCH /users/me — which deliberately
+    excludes name — this one call is allowed to set it, since it's the same
+    signup step as choosing it in the first place."""
+    update = {"name": data.name}
+    if data.phone:
+        update["phone"] = data.phone
+    await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": update})
+    u = await db.users.find_one({"_id": ObjectId(user["id"])})
+    return {"user": sanitize_user(u)}
 
 
 @api_router.post("/auth/login")
@@ -491,36 +651,65 @@ async def login(data: LoginIn, response: Response):
         result = await db.users.insert_one(doc)
         doc["_id"] = result.inserted_id
         user = doc
+    if user.get("email_verify_required"):
+        # Only /auth/verify-otp clears this flag now (self-managed OTP, not
+        # Firebase's own emailVerified claim — see _send_otp/verify_otp above).
+        raise HTTPException(status_code=403, detail="EMAIL_NOT_VERIFIED")
     response.set_cookie("access_token", token, httponly=True, secure=False,
                         samesite="lax", max_age=7*24*3600, path="/")
     return {"user": sanitize_user(user), "token": token}
 
 
-@api_router.post("/auth/google")
-async def login_google(data: GoogleLoginIn, response: Response):
-    """Exchange a Firebase ID token obtained via the frontend's Google sign-in
-    popup for our own session cookie — same find-or-self-heal-create flow as
-    password login, just verified instead of freshly issued here."""
+async def _login_via_verified_token(id_token: str, response: Response, build_new_user):
+    """Shared by /auth/google and /auth/phone: both hand us an already-verified
+    Firebase ID token (Google popup / Phone SMS OTP happen entirely client-side
+    via the Firebase SDK) — we just verify it, find-or-create the local profile,
+    and set the session cookie."""
     try:
-        claims = await firebase_auth.verify_id_token(data.id_token)
+        claims = await firebase_auth.verify_id_token(id_token)
     except AuthError as e:
         raise HTTPException(status_code=e.status, detail=e.message)
     fb_uid = claims["uid"]
     user = await db.users.find_one({"firebase_uid": fb_uid})
     if not user:
+        doc = build_new_user(claims)
+        result = await db.users.insert_one(doc)
+        doc["_id"] = result.inserted_id
+        user = doc
+    response.set_cookie("access_token", id_token, httponly=True, secure=False,
+                        samesite="lax", max_age=7*24*3600, path="/")
+    return {"user": sanitize_user(user), "token": id_token}
+
+
+@api_router.post("/auth/google")
+async def login_google(data: GoogleLoginIn, response: Response):
+    def build_new_user(claims):
         email = (claims.get("email") or "").lower()
-        doc = {
-            "firebase_uid": fb_uid, "email": email,
+        return {
+            "firebase_uid": claims["uid"], "email": email,
             "name": claims.get("name") or (email.split("@")[0] if email else "Learner"),
             "role": "learner", "created_at": now_utc().isoformat(),
             "avatar_url": claims.get("picture", ""), "bio": "", "parampara": "",
         }
-        result = await db.users.insert_one(doc)
-        doc["_id"] = result.inserted_id
-        user = doc
-    response.set_cookie("access_token", data.id_token, httponly=True, secure=False,
-                        samesite="lax", max_age=7*24*3600, path="/")
-    return {"user": sanitize_user(user), "token": data.id_token}
+    return await _login_via_verified_token(data.id_token, response, build_new_user)
+
+
+@api_router.post("/auth/phone")
+async def login_phone(data: PhoneLoginIn, response: Response):
+    """Exchange a Firebase ID token obtained via the frontend's Phone Auth SMS
+    OTP flow for our own session cookie. Phone-only accounts have no email, so
+    a placeholder is synthesised to satisfy the unique/not-null email column —
+    the real number lives in the `phone` field."""
+    def build_new_user(claims):
+        phone = claims.get("phone") or ""
+        return {
+            "firebase_uid": claims["uid"],
+            "email": data.email.lower() if data.email else f"{claims['uid']}@phone.tredevlearn.local",
+            "name": data.name or phone or "Learner", "phone": phone,
+            "role": "learner", "created_at": now_utc().isoformat(),
+            "avatar_url": "", "bio": "", "parampara": "",
+        }
+    return await _login_via_verified_token(data.id_token, response, build_new_user)
 
 
 @api_router.post("/auth/logout")
@@ -535,6 +724,23 @@ async def me(user: dict = Depends(get_current_user)):
 
 
 # ==================== USERS ====================
+class UserSelfUpdateIn(BaseModel):
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    parampara: Optional[str] = None
+
+
+@api_router.patch("/users/me")
+async def update_my_profile(data: UserSelfUpdateIn, user: dict = Depends(get_current_user)):
+    """Self-service profile edit — deliberately excludes name/email/role: those
+    stay identity-owned (Firebase for email, admin-only for name/role)."""
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update:
+        await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": update})
+    u = await db.users.find_one({"_id": ObjectId(user["id"])})
+    return sanitize_user(u)
+
+
 @api_router.get("/users")
 async def list_users(user: dict = Depends(require_role("admin", "super_admin"))):
     users = await db.users.find({}).to_list(1000)
@@ -544,11 +750,14 @@ async def list_users(user: dict = Depends(require_role("admin", "super_admin")))
 @api_router.patch("/users/{user_id}")
 async def update_user(user_id: str, data: UserUpdateIn,
                        actor: dict = Depends(require_role("admin", "super_admin"))):
+    target = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not target:
+        raise HTTPException(404, "User not found")
     update = {k: v for k, v in data.model_dump().items() if v is not None}
-    if "role" in update and update["role"] not in ["learner", "acharya", "academic_staff", "admin"]:
-        # super_admin cannot be assigned by admin, only super_admin can appoint super_admin
-        if update["role"] == "super_admin" and actor["role"] != "super_admin":
-            raise HTTPException(403, "Only super_admin can appoint super_admin")
+    # A plain admin can't touch an existing super_admin account in any way,
+    # nor appoint a new one — only super_admin can do either.
+    if actor["role"] != "super_admin" and (target.get("role") == "super_admin" or update.get("role") == "super_admin"):
+        raise HTTPException(403, "Only super_admin can modify a super_admin account")
     if update:
         await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update})
     await write_audit(actor, "user.update", user_id, update)
@@ -706,6 +915,19 @@ async def list_batches(offering_id: Optional[str] = None):
     return result
 
 
+@api_router.get("/batches/{batch_id}")
+async def get_batch(batch_id: str, user: dict = Depends(get_current_user)):
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b:
+        raise HTTPException(404, "Batch not found")
+    b = sanitize_doc(b)
+    b["enrolled_count"] = await db.enrollments.count_documents({"batch_id": batch_id})
+    b["seats_available"] = max(0, int(b.get("max_students") or 0) - b["enrolled_count"])
+    o = await db.offerings.find_one({"_id": ObjectId(b.get("offering_id", ""))})
+    b["offering_title"] = o.get("title", "") if o else ""
+    return b
+
+
 async def _check_batch_seat(offering_id: str, batch_id: str) -> dict:
     """Validates a batch belongs to the offering and still has a free seat.
     Raises HTTPException on any failure; returns the batch doc on success."""
@@ -749,6 +971,224 @@ async def delete_batch(batch_id: str,
     await db.batches.delete_one({"_id": ObjectId(batch_id)})
     await write_audit(actor, "batch.delete", batch_id, {})
     return {"ok": True}
+
+
+@api_router.patch("/batches/{batch_id}/timetable")
+async def upload_batch_timetable(batch_id: str, data: BatchTimetableIn,
+                                  actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                                  _feat: bool = Depends(require_feature("build"))):
+    """Staff uploads the proposed class timetable for a batch — sends it to the
+    assigned Ācharya's Approval queue before any session is actually scheduled."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "session_author"):
+        raise HTTPException(403, "Session scheduling has not been granted to you by admin — ask an admin to grant the 'session_author' capability.")
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b:
+        raise HTTPException(404, "Batch not found")
+    update = {
+        "timetable": data.items,
+        "schedule_status": "pending_approval",
+        "schedule_notes": "",
+        "schedule_submitted_at": now_utc().isoformat(),
+    }
+    await db.batches.update_one({"_id": ObjectId(batch_id)}, {"$set": update})
+    await write_audit(actor, "batch.timetable_submit", batch_id, {"items": len(data.items)})
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    return sanitize_doc(b)
+
+
+TIMETABLE_MODES = {"interactive", "broadcast"}
+
+
+def _cell_to_str(v) -> str:
+    """openpyxl hands back real date/time/datetime objects for formatted cells —
+    normalize everything (Excel cells and CSV strings alike) to plain text."""
+    if v is None:
+        return ""
+    if hasattr(v, "strftime"):
+        return v.strftime("%Y-%m-%d") if hasattr(v, "year") else v.strftime("%H:%M")
+    return str(v).strip()
+
+
+def _read_timetable_rows(content: bytes, filename: str) -> List[dict]:
+    """Parse an uploaded CSV or XLSX timetable into raw {header: value} row dicts."""
+    if filename.endswith(".xlsx"):
+        import openpyxl
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            ws = wb.active
+            rows_iter = ws.iter_rows(values_only=True)
+            header = [_cell_to_str(h).lower() for h in (next(rows_iter, None) or [])]
+            rows = []
+            for r in rows_iter:
+                if all(c is None for c in r):
+                    continue
+                rows.append({header[i]: _cell_to_str(r[i]) for i in range(min(len(header), len(r)))})
+            return rows
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Could not read Excel file: {e}")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "CSV must be UTF-8 encoded.")
+    reader = csv.DictReader(io.StringIO(text))
+    return [{(k or "").strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader]
+
+
+def _parse_timetable_rows(rows: List[dict]) -> List[dict]:
+    """Validate + convert raw rows (columns: title, date, time, duration_min, mode,
+    topic) into the same item shape the manual PATCH /timetable endpoint accepts."""
+    if not rows:
+        raise HTTPException(400, "File has no data rows.")
+    items, errors = [], []
+    for i, row in enumerate(rows, start=2):  # header is row 1
+        row_errors = []
+        title = (row.get("title") or "").strip()
+        date_s = (row.get("date") or "").strip()
+        time_s = (row.get("time") or "").strip()
+        mode = (row.get("mode") or "interactive").strip().lower()
+        topic = (row.get("topic") or "").strip()
+        if not title:
+            row_errors.append("title is required")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_s):
+            row_errors.append("date must be YYYY-MM-DD")
+        if not re.match(r"^\d{1,2}:\d{2}$", time_s):
+            row_errors.append("time must be HH:MM")
+        duration_min = 60
+        try:
+            duration_min = int(float(row.get("duration_min") or 60))
+            if duration_min <= 0:
+                row_errors.append("duration_min must be positive")
+        except ValueError:
+            row_errors.append("duration_min must be a number")
+        if mode not in TIMETABLE_MODES:
+            row_errors.append(f"mode must be one of {sorted(TIMETABLE_MODES)}")
+        if row_errors:
+            errors.append(f"Row {i}: " + ", ".join(row_errors))
+            continue
+        items.append({
+            "title": title, "starts_at": f"{date_s}T{time_s.zfill(5)}:00",
+            "duration_min": duration_min, "mode": mode, "topic": topic,
+        })
+    if errors:
+        raise HTTPException(400, "; ".join(errors[:20]))
+    return items
+
+
+@api_router.post("/batches/{batch_id}/timetable/upload")
+async def upload_batch_timetable_file(batch_id: str, file: UploadFile = File(...),
+                                       actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                                       _feat: bool = Depends(require_feature("build"))):
+    """Staff uploads a CSV/Excel timetable instead of typing sessions in one by
+    one. Columns: title, date (YYYY-MM-DD), time (HH:MM), duration_min, mode,
+    topic. Parsed rows go through the exact same pending_approval flow as the
+    manual timetable endpoint; the raw file is kept only so the Acharya can
+    reference it during review, then deleted once approved (see schedule-approval)."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "session_author"):
+        raise HTTPException(403, "Session scheduling has not been granted to you by admin — ask an admin to grant the 'session_author' capability.")
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b:
+        raise HTTPException(404, "Batch not found")
+    name = (file.filename or "schedule").lower()
+    if not (name.endswith(".csv") or name.endswith(".xlsx")):
+        raise HTTPException(400, "Upload a .csv or .xlsx file.")
+    content = await file.read()
+    if len(content) > BATCH_SCHEDULE_MAX_BYTES:
+        raise HTTPException(400, "File must be 5MB or smaller.")
+    items = _parse_timetable_rows(_read_timetable_rows(content, name))
+
+    source_url = ""
+    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", file.filename or "schedule") or "schedule"
+        path = f"{batch_id}/{secrets.token_hex(8)}_{safe}"
+        ctype = "text/csv" if name.endswith(".csv") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        source_url = upload_bytes_to_storage(BATCH_SCHEDULE_BUCKET, path, content, ctype)
+
+    update = {
+        "timetable": items,
+        "schedule_status": "pending_approval",
+        "schedule_notes": "",
+        "schedule_submitted_at": now_utc().isoformat(),
+        "schedule_source_file_url": source_url,
+    }
+    await db.batches.update_one({"_id": ObjectId(batch_id)}, {"$set": update})
+    await write_audit(actor, "batch.timetable_upload", batch_id, {"items": len(items), "filename": file.filename})
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    return sanitize_doc(b)
+
+
+@api_router.post("/batches/{batch_id}/schedule-approval")
+async def decide_batch_schedule(batch_id: str, decision: ApprovalDecisionIn,
+                                 actor: dict = Depends(require_role("acharya"))):
+    """Ācharya approves or requests changes to a batch's proposed timetable.
+    On approval, the parsed timetable rows become real live_sessions (scoped to
+    this batch, so learners in other batches of the same course never see them
+    — see /live-sessions/mine-learner's existing batch filter), and the raw
+    uploaded file is deleted since its rows now live in Postgres."""
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b:
+        raise HTTPException(404, "Batch not found")
+    o = await db.offerings.find_one({"_id": ObjectId(b["offering_id"])})
+    if not o or o.get("acharya_id") != actor["id"]:
+        raise HTTPException(403, "Only the assigned Acharya can approve this batch's timetable")
+    update = {
+        "schedule_status": "approved" if decision.approved else "changes_requested",
+        "schedule_notes": decision.notes,
+        "schedule_reviewed_at": now_utc().isoformat(),
+    }
+    if decision.approved:
+        for item in (b.get("timetable") or []):
+            doc = {
+                "title": item.get("title", ""), "offering_id": b["offering_id"],
+                "acharya_id": actor["id"], "acharya_name": actor.get("name", ""),
+                "starts_at": item.get("starts_at", ""),
+                "duration_min": int(item.get("duration_min") or 60),
+                "mode": item.get("mode", "interactive"), "topic": item.get("topic", ""),
+                "batch_id": batch_id, "created_at": now_utc().isoformat(), "created_by": actor["id"],
+            }
+            await db.live_sessions.insert_one(doc)
+        source_url = b.get("schedule_source_file_url") or ""
+        if source_url:
+            delete_storage_object(BATCH_SCHEDULE_BUCKET, source_url.split(f"/public/{BATCH_SCHEDULE_BUCKET}/")[-1])
+        update["schedule_source_file_url"] = ""
+    await db.batches.update_one({"_id": ObjectId(batch_id)}, {"$set": update})
+    await write_audit(actor, "batch.schedule_approve" if decision.approved else "batch.schedule_reject",
+                       batch_id, {"notes": decision.notes})
+    return {"ok": True}
+
+
+async def roster_for_batch(batch_id: str) -> List[dict]:
+    """Enrolled-learner roster for one batch — name/email/basic detail. No join
+    helper exists in db.py's Mongo-style shim (it's a straight table, not SQL),
+    so this is a manual per-enrollment user lookup, same style as admin.py's
+    existing per-user offering-title lookups."""
+    enrollments = await db.enrollments.find({"batch_id": batch_id}).sort("enrolled_at", 1).to_list(1000)
+    out = []
+    for e in enrollments:
+        u = await db.users.find_one({"_id": ObjectId(e["user_id"])}) if e.get("user_id") else None
+        out.append({
+            "user_id": e.get("user_id"), "name": (u or {}).get("name", ""),
+            "email": (u or {}).get("email", ""), "enrolled_at": e.get("enrolled_at"),
+            "progress": e.get("progress", 0),
+        })
+    return out
+
+
+@api_router.get("/batches/{batch_id}/students")
+async def batch_students(batch_id: str,
+                          actor: dict = Depends(require_role(
+                              "academic_staff", "admin", "super_admin", "acharya"))):
+    b = await db.batches.find_one({"_id": ObjectId(batch_id)})
+    if not b:
+        raise HTTPException(404, "Batch not found")
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "course_builder"):
+        raise HTTPException(403, "Course building has not been granted to you by admin — ask an admin to grant the 'course_builder' capability.")
+    if actor["role"] == "acharya":
+        o = await db.offerings.find_one({"_id": ObjectId(b["offering_id"])})
+        if not o or o.get("acharya_id") != actor["id"]:
+            raise HTTPException(403, "Only the assigned Acharya can view this batch's roster")
+    return await roster_for_batch(batch_id)
 
 
 # ==================== VERSES (Shloka Player source) ====================
@@ -799,6 +1239,13 @@ async def enroll(data: EnrollIn, user: dict = Depends(get_current_user)):
     o = await db.offerings.find_one({"_id": ObjectId(data.offering_id)})
     if not o:
         raise HTTPException(404, "Offering not found")
+    # Free direct enrollment is only for $0 courses — a paid one must go through
+    # the payment flow, unless the user is staff/admin (free on everything) or
+    # the Ācharya assigned to this very course (free on their own course only).
+    if (o.get("price_inr", 0) > 0
+            and user["role"] not in STAFF_FREE_ACCESS_ROLES
+            and o.get("acharya_id") != user["id"]):
+        raise HTTPException(400, "This course requires payment — use the checkout flow.")
     batch_id = None
     if o.get("type") == "live_course":
         await _check_batch_seat(data.offering_id, data.batch_id)
@@ -867,6 +1314,7 @@ async def my_enrollments(user: dict = Depends(get_current_user)):
 
 
 LESSON_ATTENDANCE_THRESHOLD_PCT = 80
+CERTIFICATE_ATTENDANCE_THRESHOLD_PCT = 75
 
 
 @api_router.post("/enrollments/{offering_id}/lessons/{lesson_id}/watch-progress")
@@ -879,6 +1327,8 @@ async def record_lesson_watch(offering_id: str, lesson_id: str, data: LessonWatc
     e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
     if not e:
         raise HTTPException(404, "Not enrolled in this course")
+    if e.get("suspended"):
+        raise HTTPException(403, "Your access to this course has been restricted by an admin.")
     done_ids = list(e.get("completed_lessons") or [])
     if data.watched_pct >= LESSON_ATTENDANCE_THRESHOLD_PCT and lesson_id not in done_ids:
         done_ids.append(lesson_id)
@@ -1713,7 +2163,7 @@ class QueryEscalateIn(BaseModel):
 
 
 @api_router.post("/queries/{ticket_id}/escalate")
-async def escalate_query_ticket(ticket_id: str, data: QueryEscalateIn,
+async def escalate_query_ticket(ticket_id: str, data: QueryEscalateIn = QueryEscalateIn(),
                                  actor: dict = Depends(require_role(*QUERY_STAFF_ROLES))):
     """Staff flags a ticket for admin attention (e.g. 'paid but course access
     missing' — something staff can't verify/fix themselves). Admin already sees
@@ -1820,7 +2270,7 @@ async def join_session(sid: str, user: dict = Depends(get_current_user)):
     s = sanitize_doc(s)
     can_join, _ = session_join_window(s, now_utc())
     if not can_join:
-        raise HTTPException(403, "This session hasn't started yet. Join opens 5 minutes before start.")
+        raise HTTPException(403, "This session hasn't started yet. Join opens 10 minutes before start.")
     # Use the real meeting link if staff provided one; otherwise a mock placeholder.
     real = (s.get("join_url") or "").strip()
     if real:
@@ -1928,6 +2378,56 @@ async def sign_certificate(code: str, data: CertificateSignIn,
     return {"ok": True}
 
 
+@api_router.post("/certificates/{code}/reject")
+async def reject_certificate(code: str, data: CertificateRejectIn,
+                              actor: dict = Depends(require_role("acharya"))):
+    """The Ācharya's alternative to signing: something about this certificate
+    needs fixing (wrong name, wrong course, etc). The note is how staff — who
+    see this in their Certificates tab's Rejected list — learn what to fix."""
+    c = await db.certificates.find_one({"code": code})
+    if not c:
+        raise HTTPException(404, "Certificate not found")
+    if c.get("acharya_id") != actor["id"]:
+        raise HTTPException(403, "This certificate is not routed to you.")
+    if c.get("signature_status") != "pending_signature":
+        raise HTTPException(400, "This certificate is not awaiting your signature.")
+    note = (data.note or "").strip()
+    if not note:
+        raise HTTPException(400, "A reason is required so staff know what to fix.")
+    await db.certificates.update_one({"code": code}, {"$set": {
+        "signature_status": "rejected", "rejection_note": note,
+        "rejected_at": now_utc().isoformat(),
+    }})
+    await write_audit(actor, "certificate.reject", code, {"note": note})
+    return {"ok": True}
+
+
+@api_router.get("/certificates/rejected")
+async def certificates_rejected(actor: dict = Depends(require_role("academic_staff", "admin", "super_admin"))):
+    """Certificates an Ācharya sent back — staff fix the issue, then resubmit."""
+    items = await db.certificates.find({"signature_status": "rejected"}).sort("rejected_at", -1).to_list(500)
+    return [sanitize_doc(c) for c in items]
+
+
+@api_router.post("/certificates/{code}/resubmit")
+async def resubmit_certificate(code: str,
+                                actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                                _feat: bool = Depends(require_feature("certs"))):
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "certs"):
+        raise HTTPException(403, "Certificates has not been granted to you by admin — ask an admin to grant the 'certs' capability.")
+    c = await db.certificates.find_one({"code": code})
+    if not c:
+        raise HTTPException(404, "Certificate not found")
+    if c.get("signature_status") != "rejected":
+        raise HTTPException(400, "This certificate was not rejected.")
+    await db.certificates.update_one({"code": code}, {"$set": {
+        "signature_status": "pending_signature",
+        "staff_approved_at": now_utc().isoformat(), "staff_approved_by": actor["id"],
+    }})
+    await write_audit(actor, "certificate.resubmit", code, {})
+    return {"ok": True}
+
+
 # ---- Learner requests → staff approves → routes to Ācharya to sign (= published) ----
 @api_router.post("/certificates/request")
 async def request_certificate(payload: dict, user: dict = Depends(get_current_user)):
@@ -1940,8 +2440,9 @@ async def request_certificate(payload: dict, user: dict = Depends(get_current_us
         raise HTTPException(400, "You are not enrolled in this course.")
     total = len(o.get("modules") or [])
     done = len(e.get("completed_lessons") or [])
-    if not total or done < total:
-        raise HTTPException(400, "Complete all lessons before requesting a certificate.")
+    attendance_pct = round(done / total * 100) if total else 0
+    if not total or attendance_pct < CERTIFICATE_ATTENDANCE_THRESHOLD_PCT:
+        raise HTTPException(400, f"At least {CERTIFICATE_ATTENDANCE_THRESHOLD_PCT}% lesson attendance is required before requesting a certificate (currently {attendance_pct}%).")
     quiz = await db.quizzes.find_one({"offering_id": offering_id, "context": "course", "status": "published"})
     if quiz:
         attempt = await db.quiz_attempts.find_one({"quiz_id": str(quiz["_id"]), "user_id": user["id"]})
@@ -2105,6 +2606,59 @@ async def _mark_paid_and_enroll(p: dict, verified: bool):
         })
 
 
+async def _mark_paid_and_register_webinar(p: dict, verified: bool):
+    """Webinar equivalent of _mark_paid_and_enroll: idempotent, adds the payer
+    to registered_user_ids and decrements the seat count exactly once."""
+    if p.get("status") != "paid":
+        await db.payments.update_one({"order_id": p["order_id"]},
+            {"$set": {"status": "paid", "paid_at": now_utc().isoformat(), "signature_verified": verified}})
+    w = await db.webinars.find_one({"_id": ObjectId(p["webinar_id"])})
+    if not w:
+        return
+    reg = list(w.get("registered_user_ids") or [])
+    if p["user_id"] not in reg:
+        seats = int(w.get("seats_remaining", 0) or 0)
+        reg.append(p["user_id"])
+        await db.webinars.update_one({"_id": ObjectId(p["webinar_id"])},
+            {"$set": {"registered_user_ids": reg, "seats_remaining": max(0, seats - 1)}})
+
+
+@api_router.post("/payments/cashfree/create-webinar-order")
+async def create_cashfree_webinar_order(payload: dict, user: dict = Depends(get_current_user)):
+    """Real Cashfree order for a paid webinar — same pattern as the course
+    order above, but finalizes into db.webinars (registered_user_ids/seats)
+    instead of db.enrollments."""
+    webinar_id = payload["webinar_id"]
+    w = await db.webinars.find_one({"_id": ObjectId(webinar_id)})
+    if not w:
+        raise HTTPException(404, "Webinar not found")
+    seats = int(w.get("seats_remaining", 0) or 0)
+    if seats <= 0:
+        raise HTTPException(400, "This webinar is sold out.")
+    if user["id"] in (w.get("registered_user_ids") or []):
+        raise HTTPException(400, "You are already registered for this webinar.")
+    amount_inr = w.get("price_inr", 0)
+    if amount_inr <= 0:
+        raise HTTPException(400, "This webinar is free — no order needed.")
+    order_id = f"tredev_webinar_{secrets.token_hex(8)}"
+    try:
+        cf = await asyncio.to_thread(
+            cashfree.create_order, order_id, float(amount_inr), "INR",
+            user["id"], user.get("email", ""), "",
+            f"{FRONTEND_URL}/events",
+        )
+    except cashfree.CashfreeError as e:
+        raise HTTPException(e.status, e.message)
+    doc = {
+        "order_id": order_id, "user_id": user["id"], "webinar_id": webinar_id,
+        "amount_inr": amount_inr, "status": "created", "created_at": now_utc().isoformat(),
+        "mocked": False, "gateway": "cashfree", "cf_order_id": cf.get("cf_order_id") or cf.get("order_id"),
+        "currency": "INR", "signature_verified": False,
+    }
+    await db.payments.insert_one(doc)
+    return {"order_id": order_id, "amount": amount_inr, "payment_session_id": cf.get("payment_session_id")}
+
+
 @api_router.post("/payments/cashfree/create-order")
 async def create_cashfree_order(payload: dict, user: dict = Depends(get_current_user)):
     """Real Cashfree order — replaces the mocked create-order for live testing.
@@ -2164,7 +2718,10 @@ async def cashfree_webhook(request: Request):
         logger.warning(f"Cashfree webhook for unknown order_id={order_id}")
         return {"ok": True}
     if event_type == "PAYMENT_SUCCESS_WEBHOOK":
-        await _mark_paid_and_enroll(p, verified=True)
+        if p.get("webinar_id"):
+            await _mark_paid_and_register_webinar(p, verified=True)
+        else:
+            await _mark_paid_and_enroll(p, verified=True)
     elif event_type in ("PAYMENT_FAILED_WEBHOOK", "PAYMENT_USER_DROPPED_WEBHOOK"):
         await db.payments.update_one({"order_id": order_id}, {"$set": {"status": "failed"}})
     return {"ok": True}
@@ -2182,11 +2739,20 @@ async def payment_status(order_id: str, user: dict = Depends(get_current_user)):
         try:
             cf = await asyncio.to_thread(cashfree.get_order_status, order_id)
             if cf.get("order_status") == "PAID":
-                await _mark_paid_and_enroll(p, verified=True)
+                if p.get("webinar_id"):
+                    await _mark_paid_and_register_webinar(p, verified=True)
+                else:
+                    await _mark_paid_and_enroll(p, verified=True)
                 p = await db.payments.find_one({"order_id": order_id})
         except cashfree.CashfreeError as e:
             logger.warning(f"Cashfree status lookup failed for {order_id}: {e.message}")
-    return sanitize_doc(p)
+    result = sanitize_doc(p)
+    if p.get("webinar_id"):
+        w = await db.webinars.find_one({"_id": ObjectId(p["webinar_id"])})
+        if w:
+            result["webinar"] = sanitize_doc(w)
+            result["join_url"] = (w.get("join_url") or "").strip()
+    return result
 
 
 # ==================== FESTIVAL CALENDAR (staff-managed, CSV-fed) ====================
@@ -2626,6 +3192,47 @@ async def review_acharya_content(cid: str, data: AcharyaContentReviewIn,
     return {"ok": True}
 
 
+@api_router.get("/offerings/{offering_id}/notes")
+async def list_offering_notes(offering_id: str, user: dict = Depends(get_current_user)):
+    """Approved Ācharya content attached to this course — shown to the learner
+    in the course workspace's 'Notes & extra content' section."""
+    items = await db.acharya_content.find(
+        {"offering_id": offering_id, "status": "approved"}).sort("created_at", -1).to_list(200)
+    return [sanitize_doc(x) for x in items]
+
+
+@api_router.post("/acharya/content/sign-upload")
+async def sign_acharya_attachment(data: AcharyaAttachmentSignIn,
+                                   actor: dict = Depends(require_role("acharya"))):
+    """Signed upload for a note attachment. Capped at 5MB — enforced here and,
+    as the real guard, by the bucket's own file_size_limit (the browser PUTs
+    bytes straight to Supabase, so the backend never sees them to re-compress;
+    PDF/DOC/PPTX are already compressed containers, so proxying every upload
+    through the server to gzip them would cost a full round-trip for near-zero
+    savings)."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(503, "Storage is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env).")
+    if data.size_bytes and data.size_bytes > ACHARYA_ATTACHMENT_MAX_BYTES:
+        raise HTTPException(400, "Attachment must be 5MB or smaller.")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", (data.filename or "file").strip()) or "file"
+    path = f"notes/{secrets.token_hex(8)}/{safe}"
+    endpoint = f"{SUPABASE_URL}/storage/v1/object/upload/sign/{ACHARYA_MEDIA_BUCKET}/{path}"
+    try:
+        resp = requests.post(endpoint, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+    except Exception as e:
+        raise HTTPException(502, f"Storage request failed: {e}")
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"Could not sign upload ({resp.status_code}): {resp.text[:200]}")
+    signed = resp.json().get("url", "")
+    upload_url = f"{SUPABASE_URL}/storage/v1{signed}"
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{ACHARYA_MEDIA_BUCKET}/{path}"
+    return {"upload_url": upload_url, "public_url": public_url, "path": path,
+            "content_type": data.content_type, "filename": safe}
+
+
 # ==================== LIVE SESSIONS — CREATE (staff schedules for acharyas) ====================
 @api_router.post("/live-sessions")
 async def create_live_session(data: LiveSessionCreateIn,
@@ -2680,13 +3287,25 @@ async def delete_live_session(sid: str,
     return {"ok": True}
 
 
+def _parse_session_start(iso_ts: str):
+    """Batch-approved sessions store a naive 'YYYY-MM-DDTHH:MM:SS' (straight from
+    the CSV/timetable rows); manually-scheduled ones store a full UTC ISO
+    string with an offset. Both must compare against now_utc()'s aware
+    datetime, so a naive value is treated as UTC rather than left to crash
+    the subtraction below with a TypeError."""
+    start = datetime.fromisoformat(iso_ts)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start
+
+
 def session_join_window(s: dict, now: datetime):
-    """(can_join, is_live) — join opens 5 min before start, closes at start + duration."""
+    """(can_join, is_live) — join opens 10 min before start, closes at start + duration."""
     try:
-        start = datetime.fromisoformat(s["starts_at"])
+        start = _parse_session_start(s["starts_at"])
     except Exception:
         return False, False
-    can_join = (start - now).total_seconds() <= 300
+    can_join = (start - now).total_seconds() <= 600
     is_live = start <= now <= (start + timedelta(minutes=int(s.get("duration_min", 60))))
     return can_join, is_live
 
@@ -2694,7 +3313,7 @@ def session_join_window(s: dict, now: datetime):
 def session_is_past(s: dict, now: datetime) -> bool:
     """True once a session's join window has fully closed."""
     try:
-        start = datetime.fromisoformat(s["starts_at"])
+        start = _parse_session_start(s["starts_at"])
     except Exception:
         return False
     return now > start + timedelta(minutes=int(s.get("duration_min", 60)))
@@ -2702,25 +3321,43 @@ def session_is_past(s: dict, now: datetime) -> bool:
 
 @api_router.get("/live-sessions")
 async def list_live_sessions(acharya_id: Optional[str] = None,
-                              offering_id: Optional[str] = None):
+                              offering_id: Optional[str] = None,
+                              batch_id: Optional[str] = None):
     q = {}
     if acharya_id: q["acharya_id"] = acharya_id
     if offering_id: q["offering_id"] = offering_id
+    if batch_id: q["batch_id"] = batch_id
     items = await db.live_sessions.find(q).sort("starts_at", 1).to_list(500)
     now = now_utc()
     result = []
     for x in items:
         x = sanitize_doc(x)
         x["can_join"], x["is_live"] = session_join_window(x, now)
+        if x.get("batch_id"):
+            b = await db.batches.find_one({"_id": ObjectId(x["batch_id"])})
+            x["batch_name"] = b.get("name", "") if b else ""
+        if x.get("offering_id"):
+            o = await db.offerings.find_one({"_id": ObjectId(x["offering_id"])})
+            x["offering_title"] = o.get("title", "") if o else ""
         result.append(x)
     return result
 
 
 @api_router.get("/live-sessions/mine-acharya")
-async def acharya_live_sessions(user: dict = Depends(require_role("acharya"))):
-    """Sessions scheduled under this Ācharya's name — for their join view."""
+async def acharya_live_sessions(user: dict = Depends(require_role("acharya")),
+                                 batch_id: Optional[str] = None,
+                                 week_start: Optional[str] = None, week_end: Optional[str] = None):
+    """Sessions scheduled under this Ācharya's name — for their join view.
+    Optional batch_id + week_start/week_end (YYYY-MM-DD) narrow to one batch's
+    schedule one week at a time, so a CSV-scheduled cohort's whole timetable
+    isn't dumped on the Ācharya at once. The unfiltered call (no params) keeps
+    returning everything, unchanged, for the portal's general sessions list."""
     now = now_utc()
     items = await db.live_sessions.find({"acharya_id": user["id"]}).sort("starts_at", 1).to_list(500)
+    if batch_id:
+        items = [s for s in items if s.get("batch_id") == batch_id]
+    if week_start and week_end:
+        items = [s for s in items if week_start <= (s.get("starts_at") or "")[:10] <= week_end]
     result = []
     for s in items:
         s = sanitize_doc(s)
@@ -2730,15 +3367,24 @@ async def acharya_live_sessions(user: dict = Depends(require_role("acharya"))):
             if o: s["offering_title"] = o.get("title", "")
         except Exception:
             pass
+        if s.get("batch_id"):
+            b = await db.batches.find_one({"_id": ObjectId(s["batch_id"])})
+            s["batch_name"] = b.get("name", "") if b else ""
         result.append(s)
     return result
 
 
 @api_router.get("/live-sessions/mine-learner")
-async def learner_live_sessions(user: dict = Depends(get_current_user)):
+async def learner_live_sessions(user: dict = Depends(get_current_user),
+                                 batch_id: Optional[str] = None,
+                                 week_start: Optional[str] = None, week_end: Optional[str] = None):
     """Sessions for the courses this learner is enrolled in. For a live_course
     with a batch assigned, only that batch's sessions (plus whole-course
-    sessions with no batch set) are shown — not every batch's timetable."""
+    sessions with no batch set) are shown — not every batch's timetable.
+    Optional batch_id + week_start/week_end (YYYY-MM-DD) narrow to one batch's
+    schedule one week at a time, mirroring /live-sessions/mine-acharya, so the
+    portal can show "this week's classes" per batch instead of dumping the
+    whole timetable at once. The unfiltered call keeps returning everything."""
     now = now_utc()
     enrollments = await db.enrollments.find({"user_id": user["id"]}).to_list(500)
     enrolled_ids = [e.get("offering_id") for e in enrollments if e.get("offering_id")]
@@ -2751,6 +3397,10 @@ async def learner_live_sessions(user: dict = Depends(get_current_user)):
         my_batch_by_offering.get(s.get("offering_id")) and s.get("batch_id")
         and s["batch_id"] != my_batch_by_offering[s["offering_id"]]
     )]
+    if batch_id:
+        items = [s for s in items if s.get("batch_id") == batch_id]
+    if week_start and week_end:
+        items = [s for s in items if week_start <= (s.get("starts_at") or "")[:10] <= week_end]
     result = []
     for s in items:
         s = sanitize_doc(s)
@@ -2766,6 +3416,12 @@ async def learner_live_sessions(user: dict = Depends(get_current_user)):
             if o: s["offering_title"] = o.get("title", "")
         except Exception:
             pass
+        if s.get("batch_id"):
+            try:
+                b = await db.batches.find_one({"_id": ObjectId(s["batch_id"])})
+                if b: s["batch_name"] = b.get("name", "")
+            except Exception:
+                pass
         result.append(s)
     return result
 
@@ -2820,10 +3476,14 @@ async def my_webinar_registrations(user: dict = Depends(get_current_user)):
 
 @api_router.post("/webinars/{wid}/register")
 async def register_webinar(wid: str, user: dict = Depends(get_current_user)):
-    """MOCKED registration + payment — returns a payment id and the webinar details."""
+    """Free-webinar registration — no payment needed. Paid webinars must go
+    through /payments/cashfree/create-webinar-order instead, unless the user
+    is staff/admin, who get every webinar free."""
     w = await db.webinars.find_one({"_id": ObjectId(wid)})
     if not w:
         raise HTTPException(404, "Webinar not found")
+    if w.get("price_inr", 0) > 0 and user["role"] not in STAFF_FREE_ACCESS_ROLES:
+        raise HTTPException(400, "This webinar requires payment — use the checkout flow.")
     seats = int(w.get("seats_remaining", 0) or 0)
     if seats <= 0:
         raise HTTPException(400, "This webinar is sold out.")
@@ -2839,7 +3499,7 @@ async def register_webinar(wid: str, user: dict = Depends(get_current_user)):
     return {
         "ok": True, "payment_id": payment_id, "webinar": w,
         "join_url": (w.get("join_url") or "").strip(),
-        "note": "MOCKED payment — Razorpay not yet configured.",
+        "note": "Free registration — no payment required.",
     }
 
 
@@ -2916,6 +3576,174 @@ def ensure_chat_media_bucket():
             logger.warning(f"Chat-media bucket ensure returned {resp.status_code}: {resp.text[:160]}")
     except Exception as e:
         logger.warning(f"Chat-media bucket ensure failed: {e}")
+
+
+def ensure_acharya_media_bucket():
+    """Best-effort: create the Ācharya note-attachment bucket if storage is configured.
+    file_size_limit is enforced by Supabase itself — the real 5MB guard, not just a UI hint."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.info("Storage not configured — skipping acharya-content bucket ensure.")
+        return
+    try:
+        resp = requests.post(f"{SUPABASE_URL}/storage/v1/bucket", json={
+            "id": ACHARYA_MEDIA_BUCKET, "name": ACHARYA_MEDIA_BUCKET, "public": True,
+            "file_size_limit": "5MB",
+            "allowed_mime_types": [
+                "application/pdf", "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "text/plain", "image/png", "image/jpeg",
+            ],
+        }, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+        if resp.status_code < 300:
+            logger.info(f"Storage bucket '{ACHARYA_MEDIA_BUCKET}' created.")
+        elif "already exists" in resp.text.lower() or resp.status_code == 409:
+            logger.info(f"Storage bucket '{ACHARYA_MEDIA_BUCKET}' ready.")
+        else:
+            logger.warning(f"Acharya-content bucket ensure returned {resp.status_code}: {resp.text[:160]}")
+    except Exception as e:
+        logger.warning(f"Acharya-content bucket ensure failed: {e}")
+
+
+def ensure_mantra_audio_bucket():
+    """Best-effort: create (or, if it already exists, update) the mantra-audio
+    bucket. file_size_limit and allowed_mime_types are enforced by Supabase
+    itself on every upload — the real server-side guard, not just the input's
+    accept hint. allowed_mime_types was previously an exact-match list
+    (audio/mpeg, audio/wav, ...) that silently rejected anything not on it —
+    including common recordings whose reported type doesn't exact-match (e.g.
+    "audio/ogg; codecs=opus" from voice notes). "audio/*" accepts any audio
+    file's real MIME type instead of guessing every variant up front. Because
+    bucket creation is a one-time event, an already-existing bucket from
+    before this change needs its config explicitly updated too — the elif
+    branch does that instead of just logging "ready" and leaving it stale."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.info("Storage not configured — skipping mantra-audio bucket ensure.")
+        return
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+    }
+    config = {"public": True, "file_size_limit": "2MB", "allowed_mime_types": ["audio/*"]}
+    try:
+        resp = requests.post(f"{SUPABASE_URL}/storage/v1/bucket",
+            json={"id": MANTRA_AUDIO_BUCKET, "name": MANTRA_AUDIO_BUCKET, **config},
+            headers=headers, timeout=15)
+        if resp.status_code < 300:
+            logger.info(f"Storage bucket '{MANTRA_AUDIO_BUCKET}' created.")
+        elif "already exists" in resp.text.lower() or resp.status_code == 409:
+            upd = requests.put(f"{SUPABASE_URL}/storage/v1/bucket/{MANTRA_AUDIO_BUCKET}",
+                json=config, headers=headers, timeout=15)
+            if upd.status_code < 300:
+                logger.info(f"Storage bucket '{MANTRA_AUDIO_BUCKET}' ready (mime allowlist refreshed to audio/*).")
+            else:
+                logger.warning(f"Mantra-audio bucket update returned {upd.status_code}: {upd.text[:160]}")
+        else:
+            logger.warning(f"Mantra-audio bucket ensure returned {resp.status_code}: {resp.text[:160]}")
+    except Exception as e:
+        logger.warning(f"Mantra-audio bucket ensure failed: {e}")
+
+
+@api_router.post("/mantras/sign-upload")
+async def sign_mantra_audio(data: AcharyaAttachmentSignIn,
+                            actor: dict = Depends(require_role("academic_staff", "admin", "super_admin")),
+                            _feat: bool = Depends(require_feature("mantras"))):
+    """Signed upload for a mantra audio file. Capped at 2MB — enforced here and,
+    as the real guard, by the bucket's own file_size_limit."""
+    if actor["role"] == "academic_staff" and not await has_capability(actor["id"], "mantras"):
+        raise HTTPException(403, "Mantras has not been granted to you by admin — ask an admin to grant the 'mantras' capability.")
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(503, "Storage is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env).")
+    if data.size_bytes and data.size_bytes > MANTRA_AUDIO_MAX_BYTES:
+        raise HTTPException(400, "Audio file must be 2MB or smaller.")
+    ct = (data.content_type or "").lower()
+    if ct and not ct.startswith("audio/"):
+        raise HTTPException(400, "Only audio files are allowed.")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", (data.filename or "file").strip()) or "file"
+    path = f"mantras/{secrets.token_hex(8)}/{safe}"
+    endpoint = f"{SUPABASE_URL}/storage/v1/object/upload/sign/{MANTRA_AUDIO_BUCKET}/{path}"
+    try:
+        resp = requests.post(endpoint, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+    except Exception as e:
+        raise HTTPException(502, f"Storage request failed: {e}")
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"Could not sign upload ({resp.status_code}): {resp.text[:200]}")
+    signed = resp.json().get("url", "")
+    upload_url = f"{SUPABASE_URL}/storage/v1{signed}"
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{MANTRA_AUDIO_BUCKET}/{path}"
+    return {"upload_url": upload_url, "public_url": public_url, "path": path,
+            "content_type": data.content_type, "filename": safe}
+
+
+def ensure_batch_schedule_bucket():
+    """Best-effort: create the (private-in-spirit, path-token-secured like the
+    other buckets here) batch-schedules bucket for raw CSV/Excel timetable
+    uploads — deleted again once a batch's timetable is approved and turned
+    into real live_sessions rows."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.info("Storage not configured — skipping batch-schedules bucket ensure.")
+        return
+    try:
+        resp = requests.post(f"{SUPABASE_URL}/storage/v1/bucket", json={
+            "id": BATCH_SCHEDULE_BUCKET, "name": BATCH_SCHEDULE_BUCKET, "public": True,
+            "file_size_limit": "5MB",
+            "allowed_mime_types": [
+                "text/csv", "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ],
+        }, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+        if resp.status_code < 300:
+            logger.info(f"Storage bucket '{BATCH_SCHEDULE_BUCKET}' created.")
+        elif "already exists" in resp.text.lower() or resp.status_code == 409:
+            logger.info(f"Storage bucket '{BATCH_SCHEDULE_BUCKET}' ready.")
+        else:
+            logger.warning(f"Batch-schedules bucket ensure returned {resp.status_code}: {resp.text[:160]}")
+    except Exception as e:
+        logger.warning(f"Batch-schedules bucket ensure failed: {e}")
+
+
+def upload_bytes_to_storage(bucket: str, path: str, content: bytes, content_type: str) -> str:
+    """Server-side direct upload — used when the bytes already landed on the
+    backend via a multipart body, so the browser-signed-URL dance (meant for
+    large client-side uploads) would just be extra round trips."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(503, "Storage is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env).")
+    endpoint = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
+    try:
+        resp = requests.post(endpoint, headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Content-Type": content_type,
+            "x-upsert": "true",
+        }, data=content, timeout=20)
+    except Exception as e:
+        raise HTTPException(502, f"Storage upload failed: {e}")
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"Could not upload file ({resp.status_code}): {resp.text[:200]}")
+    return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"
+
+
+def delete_storage_object(bucket: str, path: str):
+    """Best-effort delete — e.g. removing a batch's raw timetable file once its
+    rows have become real live_sessions rows and the file is no longer needed."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or not path:
+        return
+    try:
+        requests.delete(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}", headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        }, timeout=15)
+    except Exception as e:
+        logger.warning(f"Could not delete {bucket}/{path}: {e}")
 
 
 @api_router.post("/storage/sign-upload")
@@ -3059,6 +3887,8 @@ async def get_lesson_playback(offering_id: str, lesson_id: str,
     is_owning_acharya = actor.get("role") == "acharya" and offering.get("acharya_id") == actor["id"]
     if not (is_enrolled or is_staff or is_owning_acharya):
         raise HTTPException(403, "Not enrolled in this course")
+    if is_enrolled and is_enrolled.get("suspended") and not (is_staff or is_owning_acharya):
+        raise HTTPException(403, "Your access to this course has been restricted by an admin.")
 
     if lesson.get("video_provider") != "bunny":
         return {"provider": lesson.get("video_provider") or "url", "video_url": lesson.get("video_url")}
@@ -3712,6 +4542,9 @@ async def on_startup():
         logger.info("Schema ensured")
     ensure_storage_bucket()
     ensure_chat_media_bucket()
+    ensure_acharya_media_bucket()
+    ensure_mantra_audio_bucket()
+    ensure_batch_schedule_bucket()
     try:
         firebase_auth.init_firebase()
     except Exception as e:

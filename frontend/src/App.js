@@ -16,9 +16,11 @@ import CertificateVerify from "@/pages/CertificateVerify";
 import LearnerDashboard from "@/pages/LearnerDashboard";
 import AcharyaPortal from "@/pages/AcharyaPortal";
 import AcademicStaffPortal from "@/pages/AcademicStaffPortal";
+import BatchDetail from "@/pages/staff/BatchDetail";
 import AdminPortal from "@/pages/AdminPortal";
 import Community from "@/pages/Community";
 import MyCertificates from "@/pages/MyCertificates";
+import Profile from "@/pages/Profile";
 import Blog from "@/pages/Blog";
 import BlogDetail from "@/pages/BlogDetail";
 import Mentors from "@/pages/Mentors";
@@ -83,9 +85,11 @@ export default function App() {
 
               <Route path="/learner" element={<Protected roles={["learner","academic_staff","acharya","admin","super_admin"]}><LearnerDashboard /></Protected>} />
               <Route path="/certificates" element={<Protected><MyCertificates /></Protected>} />
+              <Route path="/profile" element={<Protected><Profile /></Protected>} />
               <Route path="/quiz/:quizId" element={<Protected><QuizAttempt /></Protected>} />
               <Route path="/acharya" element={<Protected roles={["acharya"]}><AcharyaPortal /></Protected>} />
               <Route path="/staff" element={<Protected roles={["academic_staff","admin","super_admin"]}><AcademicStaffPortal /></Protected>} />
+              <Route path="/staff/batches/:batchId" element={<Protected roles={["academic_staff","admin","super_admin"]}><BatchDetail /></Protected>} />
               <Route path="/admin" element={<Protected roles={["admin","super_admin"]}><AdminPortal /></Protected>} />
 
               <Route path="*" element={<Navigate to="/" />} />
