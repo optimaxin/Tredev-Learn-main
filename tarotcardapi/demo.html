@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tarot Card API · Live Demo</title>
+  <meta name="description" content="A free, open source Tarot Card API with 78 high quality card images and interpretations. Built with Node.js and Express." />
+  <style>
+    :root {
+      --bg-0: #0b0820;
+      --bg-1: #14102e;
+      --bg-2: #1d1740;
+      --accent: #d4af37;
+      --accent-soft: #f2d97a;
+      --violet: #8a5cff;
+      --text: #f0ebff;
+      --muted: #a89dc8;
+      --card-bg: #1a1438;
+      --border: rgba(212, 175, 55, 0.25);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background:
+        radial-gradient(ellipse at top, #2a1a5e 0%, var(--bg-0) 45%),
+        radial-gradient(ellipse at bottom, #3d1a4a 0%, var(--bg-0) 50%);
+      background-attachment: fixed;
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        radial-gradient(2px 2px at 20% 30%, white, transparent),
+        radial-gradient(1px 1px at 60% 70%, white, transparent),
+        radial-gradient(1px 1px at 80% 20%, white, transparent),
+        radial-gradient(2px 2px at 30% 80%, white, transparent),
+        radial-gradient(1px 1px at 90% 50%, white, transparent),
+        radial-gradient(1px 1px at 10% 60%, white, transparent),
+        radial-gradient(2px 2px at 50% 10%, white, transparent);
+      background-size: 250px 250px;
+      opacity: 0.4;
+      pointer-events: none;
+      z-index: 0;
+      animation: twinkle 8s ease-in-out infinite alternate;
+    }
+
+    @keyframes twinkle {
+      from { opacity: 0.25; }
+      to { opacity: 0.55; }
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    header.hero {
+      text-align: center;
+      padding: 4rem 0 3rem;
+    }
+
+    .hero .badge {
+      display: inline-block;
+      padding: 0.4rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 0.85rem;
+      color: var(--accent-soft);
+      margin-bottom: 1.5rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 4rem);
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 50%, var(--violet) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero p.tagline {
+      font-size: 1.2rem;
+      color: var(--muted);
+      max-width: 640px;
+      margin: 0 auto 2rem;
+    }
+
+    .hero .links {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.8rem 1.6rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent) 0%, #b8941f 100%);
+      color: #1a0f00;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(212, 175, 55, 0.35);
+    }
+
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(212, 175, 55, 0.1);
+    }
+
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1.5rem;
+      margin: 3rem 0;
+    }
+
+    .stat {
+      text-align: center;
+      padding: 1.5rem;
+      background: rgba(26, 20, 56, 0.5);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .stat .num {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--accent);
+      display: block;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* Section headings */
+    section {
+      margin: 4rem 0;
+    }
+
+    h2.section-title {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    h2.section-title::before {
+      content: "✦";
+      color: var(--accent);
+    }
+
+    .section-sub {
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+
+    /* Draw Card section */
+    .draw-section {
+      background: linear-gradient(135deg, rgba(26, 20, 56, 0.8), rgba(45, 25, 80, 0.6));
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3rem;
+      text-align: center;
+    }
+
+    .card-display {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 2rem;
+      min-height: 460px;
+    }
+
+    .tarot-card {
+      width: 260px;
+      height: 420px;
+      perspective: 1500px;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+    }
+
+    .tarot-card-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.8s ease;
+      transform-style: preserve-3d;
+    }
+
+    .tarot-card.flipped .tarot-card-inner {
+      transform: rotateY(180deg);
+    }
+
+    .tarot-card-face {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      backface-visibility: hidden;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border);
+    }
+
+    .tarot-card-back {
+      background:
+        radial-gradient(circle at center, var(--violet) 0%, var(--bg-2) 70%),
+        var(--bg-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 5rem;
+      color: var(--accent);
+      border: 2px solid var(--accent);
+    }
+
+    .tarot-card-back::before {
+      content: "";
+      position: absolute;
+      inset: 12px;
+      border: 1px solid var(--accent-soft);
+      border-radius: 8px;
+      opacity: 0.5;
+    }
+
+    .tarot-card-front {
+      transform: rotateY(180deg);
+      background: var(--card-bg);
+    }
+
+    .tarot-card-front img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .card-meta {
+      max-width: 600px;
+      text-align: left;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.6s ease 0.4s;
+    }
+
+    .card-meta.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .card-meta h3 {
+      font-size: 1.8rem;
+      color: var(--accent);
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    .card-meta p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.7;
+    }
+
+    /* Endpoints */
+    .endpoints {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .endpoint {
+      background: rgba(26, 20, 56, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .endpoint:hover {
+      transform: translateY(-3px);
+      border-color: var(--accent);
+    }
+
+    .endpoint .method {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      background: #2d5a2d;
+      color: #a3e9a3;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      font-family: monospace;
+      margin-right: 0.5rem;
+    }
+
+    .endpoint code {
+      color: var(--accent-soft);
+      font-size: 1rem;
+    }
+
+    .endpoint p {
+      margin-top: 0.75rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    /* Code snippet */
+    .code-block {
+      background: #0a0820;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      font-family: "Menlo", "Monaco", monospace;
+      font-size: 0.9rem;
+      color: #e0d8ff;
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .code-block .lang {
+      position: absolute;
+      top: 0.75rem;
+      right: 1rem;
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .code-block .kw { color: #c792ea; }
+    .code-block .str { color: #a3e9a3; }
+    .code-block .com { color: #5c6b8a; font-style: italic; }
+    .code-block .fn { color: var(--accent-soft); }
+
+    /* Gallery */
+    .gallery-controls {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .search-input {
+      flex: 1;
+      min-width: 240px;
+      padding: 0.7rem 1rem;
+      background: rgba(26, 20, 56, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1rem;
+      font-family: inherit;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .gallery-card {
+      aspect-ratio: 2 / 3;
+      background: var(--card-bg);
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      position: relative;
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .gallery-card:hover {
+      transform: translateY(-6px) scale(1.03);
+      border-color: var(--accent);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .gallery-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .gallery-card .name {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
+      color: white;
+      padding: 1.5rem 0.5rem 0.5rem;
+      font-size: 0.8rem;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 3, 15, 0.92);
+      backdrop-filter: blur(10px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+
+    .modal.open { display: flex; }
+
+    .modal-content {
+      background: var(--bg-1);
+      border: 1px solid var(--accent);
+      border-radius: 16px;
+      max-width: 720px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 2rem;
+      position: relative;
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 1.5rem;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 1.8rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .modal-img {
+      width: 200px;
+      aspect-ratio: 2 / 3;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .modal-text h3 {
+      color: var(--accent);
+      margin-bottom: 1rem;
+      font-size: 1.6rem;
+    }
+
+    .modal-text p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      white-space: pre-line;
+    }
+
+    @media (max-width: 600px) {
+      .modal-content {
+        grid-template-columns: 1fr;
+      }
+      .modal-img { margin: 0 auto; }
+      .draw-section { padding: 1.5rem; }
+    }
+
+    .loading {
+      color: var(--muted);
+      text-align: center;
+      padding: 2rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 3rem 1rem 2rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      margin-top: 4rem;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="hero">
+      <span class="badge">🌙 Free and Open Source</span>
+      <h1>The Tarot Card API</h1>
+      <p class="tagline">
+        78 hand curated Tarot cards with high resolution imagery and rich, narrative interpretations.
+        Ready to drop into any project. No API keys. No rate limits. Just cards.
+      </p>
+      <div class="links">
+        <a class="btn btn-primary" href="https://github.com/krates98/tarotcardapi" target="_blank" rel="noopener">
+          ★ Star on GitHub
+        </a>
+        <a class="btn btn-ghost" href="#draw">Try the Live Demo ↓</a>
+      </div>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><span class="num" id="stat-cards">78</span><span class="label">Cards Total</span></div>
+      <div class="stat"><span class="num">22</span><span class="label">Major Arcana</span></div>
+      <div class="stat"><span class="num">56</span><span class="label">Minor Arcana</span></div>
+      <div class="stat"><span class="num">0</span><span class="label">API Keys Needed</span></div>
+    </div>
+
+    <section id="draw" class="draw-section">
+      <h2 class="section-title" style="justify-content: center;">Draw a Card</h2>
+      <p class="section-sub">Click the card to reveal your reading. Powered by <code style="color:var(--accent-soft)">GET /cards/onecard</code>.</p>
+
+      <div class="card-display">
+        <div class="tarot-card" id="drawCard">
+          <div class="tarot-card-inner">
+            <div class="tarot-card-face tarot-card-back">✦</div>
+            <div class="tarot-card-face tarot-card-front">
+              <img id="drawCardImg" alt="" />
+            </div>
+          </div>
+        </div>
+        <div class="card-meta" id="drawCardMeta">
+          <h3 id="drawCardName"></h3>
+          <p id="drawCardDesc"></p>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="drawAgainBtn" style="margin-top: 2rem;">🔮 Draw Another Card</button>
+    </section>
+
+    <section>
+      <h2 class="section-title">API Endpoints</h2>
+      <p class="section-sub">Two simple endpoints, zero ceremony.</p>
+      <div class="endpoints">
+        <div class="endpoint">
+          <div><span class="method">GET</span><code>/cards</code></div>
+          <p>Returns the entire deck of 78 cards with names, descriptions, and image URLs.</p>
+        </div>
+        <div class="endpoint">
+          <div><span class="method">GET</span><code>/cards/onecard</code></div>
+          <p>Returns a single random card. Great for daily readings or "card of the day" widgets.</p>
+        </div>
+        <div class="endpoint">
+          <div><span class="method">GET</span><code>/tarotdeck/:image</code></div>
+          <p>Serves the high resolution card artwork directly. e.g. <code>/tarotdeck/thefool.jpeg</code></p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">Try It in Code</h2>
+      <p class="section-sub">Works with anything that can speak HTTP. No SDK needed.</p>
+      <div class="code-block">
+        <span class="lang">JavaScript</span>
+<span class="com">// Pull a single random card</span>
+<span class="kw">const</span> res = <span class="kw">await</span> <span class="fn">fetch</span>(<span class="str">"http://localhost:3000/cards/onecard"</span>);
+<span class="kw">const</span> card = <span class="kw">await</span> res.<span class="fn">json</span>();
+
+console.<span class="fn">log</span>(card.name);         <span class="com">// "The Star"</span>
+console.<span class="fn">log</span>(card.description);  <span class="com">// Full interpretation</span>
+console.<span class="fn">log</span>(card.image);        <span class="com">// "/tarotdeck/thestar.jpeg"</span>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">Browse the Deck</h2>
+      <p class="section-sub">All 78 cards. Click any card to see its full interpretation.</p>
+      <div class="gallery-controls">
+        <input class="search-input" id="searchInput" type="text" placeholder="🔍 Search cards by name…" />
+      </div>
+      <div class="gallery" id="gallery">
+        <div class="loading">Loading the deck…</div>
+      </div>
+    </section>
+
+    <footer>
+      <p>Built with ❤️ by <a href="https://github.com/krates98" target="_blank" rel="noopener">krates98</a> · MIT Licensed · Free forever</p>
+    </footer>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="modal-content">
+      <button class="modal-close" id="modalClose">×</button>
+      <div class="modal-img"><img id="modalImg" alt="" /></div>
+      <div class="modal-text">
+        <h3 id="modalName"></h3>
+        <p id="modalDesc"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    const drawCard = document.getElementById("drawCard");
+    const drawCardImg = document.getElementById("drawCardImg");
+    const drawCardName = document.getElementById("drawCardName");
+    const drawCardDesc = document.getElementById("drawCardDesc");
+    const drawCardMeta = document.getElementById("drawCardMeta");
+    const drawAgainBtn = document.getElementById("drawAgainBtn");
+
+    async function drawRandomCard() {
+      drawCard.classList.remove("flipped");
+      drawCardMeta.classList.remove("visible");
+
+      try {
+        const res = await fetch(`${API_BASE}/cards/onecard`);
+        const card = await res.json();
+
+        await new Promise(r => setTimeout(r, 300));
+
+        drawCardImg.src = `${API_BASE}${card.image}`;
+        drawCardImg.alt = card.name;
+        drawCardName.textContent = card.name;
+        drawCardDesc.textContent = card.description;
+
+        drawCard.classList.add("flipped");
+        setTimeout(() => drawCardMeta.classList.add("visible"), 400);
+      } catch (err) {
+        drawCardName.textContent = "Connection error";
+        drawCardDesc.textContent = "Make sure the API server is running: npm start";
+        drawCardMeta.classList.add("visible");
+      }
+    }
+
+    drawCard.addEventListener("click", drawRandomCard);
+    drawAgainBtn.addEventListener("click", drawRandomCard);
+
+    // Gallery
+    const gallery = document.getElementById("gallery");
+    const searchInput = document.getElementById("searchInput");
+    const modal = document.getElementById("modal");
+    const modalImg = document.getElementById("modalImg");
+    const modalName = document.getElementById("modalName");
+    const modalDesc = document.getElementById("modalDesc");
+    const modalClose = document.getElementById("modalClose");
+
+    let allCards = [];
+
+    async function loadGallery() {
+      try {
+        const res = await fetch(`${API_BASE}/cards`);
+        allCards = await res.json();
+        document.getElementById("stat-cards").textContent = allCards.length;
+        renderGallery(allCards);
+      } catch (err) {
+        gallery.innerHTML = `<div class="loading">Could not load deck. Start the server with <code>npm start</code>.</div>`;
+      }
+    }
+
+    function renderGallery(cards) {
+      if (!cards.length) {
+        gallery.innerHTML = `<div class="loading">No cards match your search.</div>`;
+        return;
+      }
+      gallery.innerHTML = cards.map(card => `
+        <div class="gallery-card" data-name="${escapeHtml(card.name)}">
+          <img src="${API_BASE}${card.image}" alt="${escapeHtml(card.name)}" loading="lazy" />
+          <div class="name">${escapeHtml(card.name)}</div>
+        </div>
+      `).join("");
+
+      gallery.querySelectorAll(".gallery-card").forEach((el, i) => {
+        el.addEventListener("click", () => openModal(cards[i]));
+      });
+    }
+
+    function openModal(card) {
+      modalImg.src = `${API_BASE}${card.image}`;
+      modalImg.alt = card.name;
+      modalName.textContent = card.name;
+      modalDesc.textContent = card.description;
+      modal.classList.add("open");
+    }
+
+    function closeModal() { modal.classList.remove("open"); }
+
+    modalClose.addEventListener("click", closeModal);
+    modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+    searchInput.addEventListener("input", (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = allCards.filter(c => c.name.toLowerCase().includes(q));
+      renderGallery(filtered);
+    });
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    loadGallery();
+    drawRandomCard();
+  </script>
+</body>
+</html>
