@@ -1,0 +1,27 @@
+{
+  "name": "tarotapi",
+  "version": "1.1.0",
+  "description": "A comprehensive Tarot card API built with Node.js, providing developers with easy access to a vast collection of Tarot card meanings, interpretations, and symbolism. This API allows users to retrieve Tarot card details, including card images, descriptions, upright and reversed meanings, and associated keywords. Harness the power of Tarot to enhance your applications, websites, or personal projects with this intuitive and versatile API.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "keywords": [
+    "tarotcard",
+    "tarot",
+    "tarot-api",
+    "divination",
+    "cards"
+  ],
+  "author": "Kushagra Srivastava",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
