@@ -28,7 +28,7 @@ export default function CertificateVerify() {
     <div className="max-w-3xl mx-auto py-24 px-6">
       <div className="eyebrow mb-3">Public verification</div>
       <h1 className="text-5xl font-serif mb-4">Verify a certificate.</h1>
-      <p className="text-foreground/70 mb-10">Every Tredev Learn certificate has a public verification page. A revoked certificate says so, rather than vanishing.</p>
+      <p className="text-foreground/70 mb-10">Every Tredeva Learn certificate has a public verification page. A revoked certificate says so, rather than vanishing.</p>
       <form onSubmit={verify} className="flex gap-3">
         <Input value={code} onChange={(e)=>setCode(e.target.value)} placeholder="TDL-XXXX-YYYY"
           data-testid="verify-input" className="h-12 flex-1 font-mono" />

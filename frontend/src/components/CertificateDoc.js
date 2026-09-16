@@ -42,7 +42,7 @@ export function CertificateDoc({ cert, logos = {} }) {
         <div className="w-full flex items-start justify-between gap-2">
           <Slot label="Tredev Learnings logo" src={logos.learnings} className="w-[clamp(2rem,8cqw,3.5rem)] h-[clamp(2rem,8cqw,3.5rem)] shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="font-display font-bold text-[clamp(0.85rem,3cqw,1.25rem)] tracking-[0.15em] text-amber-900">TREDEV LEARN</div>
+            <div className="font-display font-bold text-[clamp(0.85rem,3cqw,1.25rem)] tracking-[0.15em] text-amber-900">TREDEVA LEARN</div>
             <div className="text-[8px] uppercase tracking-[0.3em] text-amber-800/70 mt-1">वेद विद्या · a credential worth holding</div>
           </div>
           <Slot label="Tredev Gems logo" src={logos.gems} className="w-[clamp(2rem,8cqw,3.5rem)] h-[clamp(2rem,8cqw,3.5rem)] shrink-0" />

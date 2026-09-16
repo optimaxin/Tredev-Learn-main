@@ -46,7 +46,7 @@ function Kundli() {
             <div><div className="eyebrow">{t("tools.kundli.moonSign")}</div><div className="font-serif text-xl mt-1">{result.moon_sign}</div></div>
             <div><div className="eyebrow">{t("tools.kundli.sunSign")}</div><div className="font-serif text-xl mt-1">{result.sun_sign}</div></div>
           </div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {result.houses.map((h) => (
               <div key={h.house} className="border border-border rounded p-3 text-xs h-24 flex flex-col">
                 <div className="tabular text-[10px] text-muted-foreground">{t("tools.kundli.house")} {h.house}</div>
@@ -88,7 +88,7 @@ export default function Calculators() {
         </p>
       </div>
       <Tabs defaultValue={initialTab}>
-        <TabsList className="mb-8 flex-wrap h-auto bg-background/85 backdrop-blur-sm">
+        <TabsList className="mb-8 flex-nowrap overflow-x-auto justify-start max-w-full sm:flex-wrap sm:overflow-visible h-auto bg-background/85 backdrop-blur-sm">
           <TabsTrigger value="panchang" data-testid="tab-panchang">{t("tools.calculatorsPage.tabPanchang")}</TabsTrigger>
           <TabsTrigger value="numerology" data-testid="tab-numerology">{t("tools.calculatorsPage.tabNumerology")}</TabsTrigger>
           <TabsTrigger value="kundli" data-testid="tab-kundli">{t("tools.calculatorsPage.tabKundli")}</TabsTrigger>

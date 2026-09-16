@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatApiError } from "@/lib/api";
 import { sendPhoneOtp, confirmPhoneOtp } from "@/lib/firebaseClient";
+import { portalPath } from "@/lib/roles";
 import { Mail, Phone, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,10 +35,7 @@ export default function Login() {
   const [phoneCode, setPhoneCode] = useState("");
   const [confirmation, setConfirmation] = useState(null);
 
-  const destFor = (user) => loc.state?.from ||
-    (user.role === "acharya" ? "/acharya" :
-     user.role === "academic_staff" ? "/staff" :
-     (user.role === "admin" || user.role === "super_admin") ? "/admin" : "/learner");
+  const destFor = (user) => loc.state?.from || portalPath(user.role);
 
   const back = () => setStep("choose");
 

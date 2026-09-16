@@ -31,12 +31,13 @@ import Mantras from "@/pages/Mantras";
 import AboutUs from "@/pages/AboutUs";
 import ShlokaPlayer from "@/components/ShlokaPlayer";
 import { fetchDailyVerse } from "@/lib/dailyVerse";
+import { portalPath } from "@/lib/roles";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-20 text-center text-muted-foreground">…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (roles && !roles.includes(user.role)) return <Navigate to={portalPath(user.role)} replace />;
   return children;
 }
 
@@ -83,7 +84,7 @@ export default function App() {
               <Route path="/mantras" element={<Mantras />} />
               <Route path="/about" element={<AboutUs />} />
 
-              <Route path="/learner" element={<Protected roles={["learner","academic_staff","acharya","admin","super_admin"]}><LearnerDashboard /></Protected>} />
+              <Route path="/learner" element={<Protected roles={["learner"]}><LearnerDashboard /></Protected>} />
               <Route path="/certificates" element={<Protected><MyCertificates /></Protected>} />
               <Route path="/profile" element={<Protected><Profile /></Protected>} />
               <Route path="/quiz/:quizId" element={<Protected><QuizAttempt /></Protected>} />

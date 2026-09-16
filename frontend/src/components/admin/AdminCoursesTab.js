@@ -7,8 +7,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import UserDetailDialog from "@/components/admin/UserDetailDialog";
+import CourseWorkspace from "@/components/CourseWorkspace";
 import { toast } from "sonner";
-import { Search, Users } from "lucide-react";
+import { Search, Users, PlayCircle } from "lucide-react";
 
 const FLAGS = [
   { key: "is_popular", label: "Popular" },
@@ -92,12 +93,27 @@ function CourseRosterDialog({ offering, onClose }) {
   );
 }
 
+/** Full course content — lessons, videos, live sessions/recordings, the
+ * assessment — exactly what an admin/super_admin gets by role, with no
+ * enrollment needed. Same viewer a learner uses, in a bigger dialog. */
+function CourseContentDialog({ offering, onClose }) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto" data-testid="course-content-dialog">
+        <DialogHeader><DialogTitle>{offering.title}</DialogTitle></DialogHeader>
+        <CourseWorkspace offeringId={offering.id} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Admin Portal — "Courses" tab: the old single-row publish toggle, plus bulk
  * select + publish/unpublish/archive, and Popular/Recommended/Verified flags. */
 export default function AdminCoursesTab({ offerings, onReload }) {
   const [selected, setSelected] = useState([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [rosterFor, setRosterFor] = useState(null);
+  const [contentFor, setContentFor] = useState(null);
 
   const toggleSelected = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
@@ -155,10 +171,14 @@ export default function AdminCoursesTab({ offerings, onReload }) {
           <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRosterFor(o)} data-testid={`course-students-${o.id}`}>
             <Users className="w-3.5 h-3.5 mr-1.5" /> Students
           </Button>
+          <Button size="sm" variant="outline" className="rounded-full" onClick={() => setContentFor(o)} data-testid={`course-content-${o.id}`}>
+            <PlayCircle className="w-3.5 h-3.5 mr-1.5" /> View content
+          </Button>
         </div>
       ))}
 
       {rosterFor && <CourseRosterDialog offering={rosterFor} onClose={() => setRosterFor(null)} />}
+      {contentFor && <CourseContentDialog offering={contentFor} onClose={() => setContentFor(null)} />}
 
       {archived.length > 0 && (
         <div>

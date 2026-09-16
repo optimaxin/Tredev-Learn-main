@@ -226,7 +226,7 @@ export default function AcharyaPortal() {
       {user?.parampara && <p className="mt-2 italic text-accent font-editorial text-lg">{user.parampara}</p>}
 
       <Tabs defaultValue="approvals" className="mt-10">
-        <TabsList className="flex-wrap h-auto">
+        <TabsList className="flex-nowrap overflow-x-auto justify-start max-w-full sm:flex-wrap sm:overflow-visible h-auto">
           <TabsTrigger value="approvals" data-testid="acharya-tab-approvals">{t("acharyaPortal.tabApprovals")} ({pending.length})</TabsTrigger>
           <TabsTrigger value="content" data-testid="acharya-tab-content">{t("acharyaPortal.tabAddContent")}</TabsTrigger>
           <TabsTrigger value="content-log" data-testid="acharya-tab-content-log">{t("acharyaPortal.tabMySubmissions")} ({contentSubmissions.length})</TabsTrigger>

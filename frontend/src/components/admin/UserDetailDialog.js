@@ -67,7 +67,7 @@ export default function UserDetailDialog({ user, trigger }) {
         ) : detail?.staff_report ? (
           <div className="space-y-3" data-testid="user-detail-staff-report">
             <div className="eyebrow mb-2">Query-handling report</div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="rounded-lg border border-border p-3">
                 <div className="text-xs text-muted-foreground">Queries claimed</div>
                 <div className="text-lg font-serif mt-1">{detail.staff_report.queries_claimed}</div>
@@ -89,7 +89,7 @@ export default function UserDetailDialog({ user, trigger }) {
         ) : detail?.acharya_report ? (
           <div className="space-y-3" data-testid="user-detail-acharya-report">
             <div className="eyebrow mb-2">Teaching report</div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-lg border border-border p-3">
                 <div className="text-xs text-muted-foreground">Courses taught</div>
                 <div className="text-lg font-serif mt-1">{detail.acharya_report.courses_taught}</div>

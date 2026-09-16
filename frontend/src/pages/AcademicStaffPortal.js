@@ -384,7 +384,7 @@ export default function AcademicStaffPortal() {
       <h1 className="text-5xl font-display font-bold tracking-tight">{user?.name}</h1>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
-        <TabsList className="flex-wrap h-auto">
+        <TabsList className="flex-nowrap overflow-x-auto justify-start max-w-full sm:flex-wrap sm:overflow-visible h-auto">
           {isEnabled("build") && <TabsTrigger value="build" data-testid="staff-tab-build">Course builder</TabsTrigger>}
           {isEnabled("offerings") && <TabsTrigger value="offerings" data-testid="staff-tab-offerings">All offerings ({offerings.length})</TabsTrigger>}
           {isEnabled("sessions") && <TabsTrigger value="sessions" data-testid="staff-tab-sessions">Schedule sessions</TabsTrigger>}
@@ -539,7 +539,7 @@ export default function AcademicStaffPortal() {
                 <SelectContent>{acharyas.map(a=><SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="eyebrow">Starts at</label>
                 <Input type="datetime-local" value={newSession.starts_at} onChange={(e)=>setNewSession({...newSession, starts_at: e.target.value})} data-testid="session-starts" className="mt-2 h-11" />
@@ -589,7 +589,7 @@ export default function AcademicStaffPortal() {
                 canManageSessions && editSession?.id === s.id ? (
                   <div key={s.id} className="rounded-xl border border-primary/40 p-4 bg-card space-y-3" data-testid={`edit-session-${s.id}`}>
                     <Input value={editSession.title} onChange={(e)=>setEditSession({...editSession, title:e.target.value})} className="h-10" placeholder="Title" />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <Select value={editSession.offering_id} onValueChange={(v)=>setEditSession({...editSession, offering_id:v})}>
                         <SelectTrigger className="h-10"><SelectValue placeholder="Course"/></SelectTrigger>
                         <SelectContent>
@@ -607,7 +607,7 @@ export default function AcademicStaffPortal() {
                         <SelectContent>{sessionBatches.map(b=><SelectItem key={b.id} value={b.id}>{b.name} · starts {b.start_date}</SelectItem>)}</SelectContent>
                       </Select>
                     )}
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <Input type="datetime-local" value={editSession.starts_at} onChange={(e)=>setEditSession({...editSession, starts_at:e.target.value})} className="h-10" />
                       <Input type="number" value={editSession.duration_min} onChange={(e)=>setEditSession({...editSession, duration_min:e.target.value})} className="h-10" />
                     </div>
@@ -675,7 +675,7 @@ export default function AcademicStaffPortal() {
               <label className="eyebrow">Cover image URL</label>
               <Input value={newWebinar.cover_image} onChange={(e)=>setNewWebinar({...newWebinar, cover_image: e.target.value})} className="mt-2 h-11" placeholder="https://…" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="eyebrow">Starts at</label>
                 <Input type="datetime-local" value={newWebinar.starts_at} onChange={(e)=>setNewWebinar({...newWebinar, starts_at: e.target.value})} data-testid="webinar-starts" className="mt-2 h-11" />
@@ -692,7 +692,7 @@ export default function AcademicStaffPortal() {
                 <SelectContent>{acharyas.map(a=><SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="eyebrow">Price (INR)</label>
                 <Input type="number" value={newWebinar.price_inr} onChange={(e)=>setNewWebinar({...newWebinar, price_inr: e.target.value})} className="mt-2 h-11" />
@@ -724,7 +724,7 @@ export default function AcademicStaffPortal() {
                     <Input value={editWebinar.title} onChange={(e)=>setEditWebinar({...editWebinar, title:e.target.value})} className="h-10" placeholder="Title" />
                     <Textarea value={editWebinar.description} onChange={(e)=>setEditWebinar({...editWebinar, description:e.target.value})} className="min-h-[70px]" placeholder="Description" />
                     <Input value={editWebinar.cover_image} onChange={(e)=>setEditWebinar({...editWebinar, cover_image:e.target.value})} className="h-10" placeholder="Cover image URL" />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <Input type="datetime-local" value={editWebinar.starts_at} onChange={(e)=>setEditWebinar({...editWebinar, starts_at:e.target.value})} className="h-10" />
                       <Input type="number" value={editWebinar.duration_min} onChange={(e)=>setEditWebinar({...editWebinar, duration_min:e.target.value})} className="h-10" placeholder="Duration" />
                     </div>
@@ -732,7 +732,7 @@ export default function AcademicStaffPortal() {
                       <SelectTrigger className="h-10"><SelectValue placeholder="Mentor"/></SelectTrigger>
                       <SelectContent>{acharyas.map(a=><SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
                     </Select>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <Input type="number" value={editWebinar.price_inr} onChange={(e)=>setEditWebinar({...editWebinar, price_inr:e.target.value})} className="h-10" placeholder="₹" />
                       <Input type="number" value={editWebinar.orig_price_inr} onChange={(e)=>setEditWebinar({...editWebinar, orig_price_inr:e.target.value})} className="h-10" placeholder="Orig ₹" />
                       <Input type="number" value={editWebinar.seats_remaining} onChange={(e)=>setEditWebinar({...editWebinar, seats_remaining:e.target.value})} className="h-10" placeholder="Seats" />

@@ -93,7 +93,7 @@ function CertificatePreview({ c, onDownload }) {
         <div className="absolute inset-4 border-2 border-amber-800/40 rounded-lg pointer-events-none" />
         <div className="absolute inset-6 border border-amber-800/25 rounded pointer-events-none" />
         <div className="relative text-center text-amber-950">
-          <div className="text-[10px] tracking-[0.3em] uppercase text-amber-800/70">Tredev Learn</div>
+          <div className="text-[10px] tracking-[0.3em] uppercase text-amber-800/70">Tredeva Learn</div>
           <div className="font-devanagari text-lg mt-1 text-amber-900">प्रमाणपत्रम्</div>
           <div className="mt-4 text-[10px] tracking-widest uppercase text-amber-800/70">{t("learnerDashboard.certPreview.certifyThat")}</div>
           <div className="font-display font-bold text-2xl md:text-3xl mt-1 text-amber-950 leading-tight">
@@ -197,7 +197,7 @@ export default function LearnerDashboard() {
 
       <div className="mt-10">
       <Tabs defaultValue="courses" className="grid lg:grid-cols-[260px_1fr] gap-10 items-start">
-        <TabsList className="flex flex-wrap lg:flex-nowrap lg:flex-col h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3" data-testid="learner-nav">
+        <TabsList className="flex flex-nowrap overflow-x-auto lg:overflow-visible lg:flex-col [&>*]:shrink-0 h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3" data-testid="learner-nav">
           <TabsTrigger value="courses" data-testid="learner-tab-courses" className="justify-start text-base font-medium py-3 px-4 rounded-xl">
             <BookOpen className="w-4 h-4 mr-3 shrink-0" /> {t("learnerDashboard.tabStudy")}
           </TabsTrigger>
