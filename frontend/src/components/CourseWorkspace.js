@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import SadhanaCounter from "@/components/SadhanaCounter";
 import VideoPlayer from "@/components/VideoPlayer";
 import VideoComments from "@/components/VideoComments";
+import { useAuth } from "@/context/AuthContext";
+import { isStaffRole } from "@/lib/roles";
 import { CheckCircle2, Circle, PlayCircle, Award, ClipboardList, Radio, Video, ScrollText, Paperclip } from "lucide-react";
 
 const certLabel = (t, status) => ({
@@ -25,6 +27,8 @@ const assessmentLabel = (t, status) => ({
  * it can be embedded anywhere (Learner Dashboard, public course page) without prop-drilling. */
 export default function CourseWorkspace({ offeringId }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isPreviewer = isStaffRole(user?.role);
   const [offering, setOffering] = useState(null);
   const [completed, setCompleted] = useState([]);
   const [myCert, setMyCert] = useState(null);
@@ -46,7 +50,12 @@ export default function CourseWorkspace({ offeringId }) {
     setCompleted(en?.completed_lessons || []);
     const mc = await api.get("/certificates/mine-all").catch(() => ({ data: [] }));
     setMyCert((Array.isArray(mc.data) ? mc.data : []).find((c) => c.offering_id === offeringId && !c.revoked) || null);
-    const ls = await api.get("/live-sessions/mine-learner").catch(() => ({ data: [] }));
+    // A previewing staff/admin has no enrollment, so "mine-learner" would come
+    // back empty — they get every session across every batch instead, which
+    // is the whole point of role-based access (not just their own batch).
+    const ls = isPreviewer
+      ? await api.get("/live-sessions", { params: { offering_id: offeringId } }).catch(() => ({ data: [] }))
+      : await api.get("/live-sessions/mine-learner").catch(() => ({ data: [] }));
     setSessions((Array.isArray(ls.data) ? ls.data : []).filter((s) => s.offering_id === offeringId));
     const nt = await api.get(`/offerings/${offeringId}/notes`).catch(() => ({ data: [] }));
     setNotes(Array.isArray(nt.data) ? nt.data : []);
@@ -62,13 +71,15 @@ export default function CourseWorkspace({ offeringId }) {
     if (!offering) return;
     const total = (offering.modules || []).length;
     const donePct = total ? Math.round((completed.length / total) * 100) : 0;
-    if (donePct !== 100) return;
+    // A previewer never has lessons marked complete — they get the assessment
+    // shown regardless, same as the backend unlocks it for them either way.
+    if (donePct !== 100 && !isPreviewer) return;
     api.get(`/offerings/${offeringId}/assessment`).then(({ data }) => {
       if (data?.locked) return;
       setAssessment(data);
       api.get(`/quizzes/${data.id}/my-attempt`).then((r) => setAttemptStatus(r.data)).catch(() => {});
     }).catch(() => {});
-  }, [offering, completed, offeringId]);
+  }, [offering, completed, offeringId, isPreviewer]);
 
   // Auto-attendance: called with the highest % watched so far as the video plays.
   // Reports once per lesson per session, only once the 80% threshold is crossed —
@@ -118,7 +129,7 @@ export default function CourseWorkspace({ offeringId }) {
         </div>
       )}
 
-      {!isLiveCourse && (
+      {!isLiveCourse && !isPreviewer && (
         <>
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-medium text-muted-foreground">{completed.length}/{totalLessons} {t("courseWorkspace.lessonsComplete")}</div>
@@ -130,8 +141,9 @@ export default function CourseWorkspace({ offeringId }) {
         </>
       )}
 
-      {/* Certificate — unlocks only after the assessment (if any) has been attempted */}
-      {pct === 100 && (
+      {/* Certificate — unlocks only after the assessment (if any) has been attempted.
+          Never shown to a role-based previewer — they haven't "completed" anything. */}
+      {pct === 100 && !isPreviewer && (
         <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-center gap-4 flex-wrap" data-testid="cert-cta">
           <Award className="w-6 h-6 text-primary shrink-0" />
           <div className="flex-1 min-w-[220px]">
@@ -157,8 +169,8 @@ export default function CourseWorkspace({ offeringId }) {
         </div>
       )}
 
-      {/* Assessment — unlocks only once every lesson is marked complete */}
-      {pct === 100 && assessment && (
+      {/* Assessment — unlocks once every lesson is marked complete, or always for a previewer */}
+      {(pct === 100 || isPreviewer) && assessment && (
         <div className="mb-8 rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-center gap-4 flex-wrap" data-testid="assessment-cta">
           <ClipboardList className="w-6 h-6 text-primary shrink-0" />
           <div className="flex-1 min-w-[220px]">

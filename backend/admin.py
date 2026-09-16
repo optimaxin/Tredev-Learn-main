@@ -18,6 +18,16 @@ from firebase_auth import AuthError
 
 router = APIRouter()
 
+STAFF_ROLES = ("academic_staff", "admin", "super_admin")
+
+
+async def _staff_user_ids() -> set:
+    """Ids of staff/admin/super_admin accounts — these get free, un-gated
+    course access by role (see CourseDetail.js) and must never count as real
+    enrollments in the revenue/enrollment reports below."""
+    staff = await db.users.find({"role": {"$in": list(STAFF_ROLES)}}).to_list(10000)
+    return {str(u.get("_id", u.get("id", ""))) for u in staff}
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -395,10 +405,11 @@ async def admin_dashboard(actor: dict = Depends(require_role("admin", "super_adm
 @router.get("/admin/top-courses")
 async def top_courses(actor: dict = Depends(require_role("admin", "super_admin"))):
     enrollments = await db.enrollments.find({}).to_list(20000)
+    staff_ids = await _staff_user_ids()
     counts: Dict[str, int] = {}
     for e in enrollments:
         oid = e.get("offering_id")
-        if oid:
+        if oid and e.get("user_id") not in staff_ids:
             counts[oid] = counts.get(oid, 0) + 1
     top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
     result = []
@@ -509,6 +520,7 @@ async def course_report(offering_id: str, actor: dict = Depends(require_role("ad
 
     all_payments = await db.payments.find({}).to_list(20000)
     all_enrollments = await db.enrollments.find({}).to_list(20000)
+    staff_ids = await _staff_user_ids()
 
     revenue_by_course: Dict[str, int] = {}
     enrollments_by_course: Dict[str, int] = {}
@@ -527,7 +539,7 @@ async def course_report(offering_id: str, actor: dict = Depends(require_role("ad
                 monthly[mk]["revenue_inr"] += p.get("amount_inr", 0)
     for e in all_enrollments:
         oid = e.get("offering_id")
-        if not oid:
+        if not oid or e.get("user_id") in staff_ids:
             continue
         enrollments_by_course[oid] = enrollments_by_course.get(oid, 0) + 1
         if oid == offering_id:

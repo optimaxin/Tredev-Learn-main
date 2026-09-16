@@ -62,6 +62,12 @@ export default function TarotTool() {
   const [dealt, setDealt] = useState(false);
   const [pickedIndex, setPickedIndex] = useState(null);
   const [flipped, setFlipped] = useState(false);
+  // ponytail: radius/arc scale off the viewport at mount, not on resize — a
+  // rotate-mid-reading edge case, not worth a resize listener here.
+  const [sceneWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1024));
+  const isNarrow = sceneWidth < 640;
+  const spreadArc = isNarrow ? 90 : SPREAD_ARC;
+  const spreadRadius = isNarrow ? 140 : 340;
 
   // Deal the fan out from the deck a beat after the spread mounts.
   useEffect(() => {
@@ -183,11 +189,11 @@ export default function TarotTool() {
           <p className="text-sm text-muted-foreground mb-10 text-center">
             {pickedIndex === null ? t("tools.tarot.focusHint") : t("tools.tarot.revealing")}
           </p>
-          <div className="tarot-scene relative h-72 sm:h-96 max-w-4xl mx-auto">
+          <div className="tarot-scene relative h-72 sm:h-96 max-w-4xl mx-auto overflow-hidden">
             {Array.from({ length: SPREAD_COUNT }).map((_, i) => {
-              const angle = (i - (SPREAD_COUNT - 1) / 2) * (SPREAD_ARC / (SPREAD_COUNT - 1));
+              const angle = (i - (SPREAD_COUNT - 1) / 2) * (spreadArc / (SPREAD_COUNT - 1));
               const rad = (angle * Math.PI) / 180;
-              const radius = 340;
+              const radius = spreadRadius;
               const x = radius * Math.sin(rad);
               const y = radius * (1 - Math.cos(rad));
               const isCenter = i === SPREAD_CENTER;

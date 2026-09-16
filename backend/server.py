@@ -905,14 +905,22 @@ async def create_batch(data: BatchIn,
     return sanitize_doc(doc)
 
 
+async def _batch_enrolled_count(batch_id: str, staff_ids: set) -> int:
+    """Real (non-staff) seats taken — staff/admin get free role-based access
+    and must never occupy or be counted against a batch's seat cap."""
+    rows = await db.enrollments.find({"batch_id": batch_id}).to_list(2000)
+    return sum(1 for e in rows if e.get("user_id") not in staff_ids)
+
+
 @api_router.get("/batches")
 async def list_batches(offering_id: Optional[str] = None):
     q = {"offering_id": offering_id} if offering_id else {}
     items = await db.batches.find(q).sort("start_date", 1).to_list(200)
+    staff_ids = await admin._staff_user_ids()
     result = []
     for b in items:
         b = sanitize_doc(b)
-        b["enrolled_count"] = await db.enrollments.count_documents({"batch_id": b["id"]})
+        b["enrolled_count"] = await _batch_enrolled_count(b["id"], staff_ids)
         b["seats_available"] = max(0, int(b.get("max_students") or 0) - b["enrolled_count"])
         result.append(b)
     return result
@@ -924,7 +932,8 @@ async def get_batch(batch_id: str, user: dict = Depends(get_current_user)):
     if not b:
         raise HTTPException(404, "Batch not found")
     b = sanitize_doc(b)
-    b["enrolled_count"] = await db.enrollments.count_documents({"batch_id": batch_id})
+    staff_ids = await admin._staff_user_ids()
+    b["enrolled_count"] = await _batch_enrolled_count(batch_id, staff_ids)
     b["seats_available"] = max(0, int(b.get("max_students") or 0) - b["enrolled_count"])
     o = await db.offerings.find_one({"_id": ObjectId(b.get("offering_id", ""))})
     b["offering_title"] = o.get("title", "") if o else ""
@@ -939,7 +948,8 @@ async def _check_batch_seat(offering_id: str, batch_id: str) -> dict:
     b = await db.batches.find_one({"_id": ObjectId(batch_id)})
     if not b or str(b.get("offering_id")) != str(offering_id):
         raise HTTPException(404, "Batch not found for this course.")
-    enrolled_count = await db.enrollments.count_documents({"batch_id": batch_id})
+    staff_ids = await admin._staff_user_ids()
+    enrolled_count = await _batch_enrolled_count(batch_id, staff_ids)
     # ponytail: count-then-insert, not a locking transaction — two concurrent
     # enrollments on the last seat could both pass this check. Fine at this
     # scale; add a DB-level seat lock if overselling ever actually happens.
@@ -1242,12 +1252,11 @@ async def enroll(data: EnrollIn, user: dict = Depends(get_current_user)):
     o = await db.offerings.find_one({"_id": ObjectId(data.offering_id)})
     if not o:
         raise HTTPException(404, "Offering not found")
-    # Free direct enrollment is only for $0 courses — a paid one must go through
-    # the payment flow, unless the user is staff/admin (free on everything) or
-    # the Ācharya assigned to this very course (free on their own course only).
-    if (o.get("price_inr", 0) > 0
-            and user["role"] not in STAFF_FREE_ACCESS_ROLES
-            and o.get("acharya_id") != user["id"]):
+    # Free direct enrollment is only for $0 courses — a paid one must always go
+    # through the payment flow. Staff/admin/acharya never need an enrollment
+    # row at all: they see every course through their own role-scoped portal
+    # (CourseDetail.js's canView), not by enrolling like a learner.
+    if o.get("price_inr", 0) > 0:
         raise HTTPException(400, "This course requires payment — use the checkout flow.")
     batch_id = None
     if o.get("type") == "live_course":
@@ -1782,9 +1791,10 @@ async def get_offering_assessment(offering_id: str, user: dict = Depends(get_cur
         {"offering_id": offering_id, "context": "course", "status": "published"})
     if not quiz:
         raise HTTPException(404, "No assessment for this course")
-    e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
-    if not e or e.get("status") != "completed":
-        return {"locked": True}
+    if user["role"] not in STAFF_FREE_ACCESS_ROLES:
+        e = await db.enrollments.find_one({"user_id": user["id"], "offering_id": offering_id})
+        if not e or e.get("status") != "completed":
+            return {"locked": True}
     quiz = sanitize_doc(quiz)
     quiz["questions"] = [strip_question_answers(normalize_question(x, i))
                           for i, x in enumerate(quiz.get("questions", []))]

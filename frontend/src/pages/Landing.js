@@ -391,7 +391,7 @@ function BlogSection({ blogs }) {
           <div>
             <div className="chip bg-primary/15 text-primary border border-primary/30 mb-3">{t("landing.blog.badge")}</div>
             <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight">
-              {t("landing.blog.headingPrefix")}<span className="text-gradient-hot">Tredev Learn</span>{t("landing.blog.headingSuffix")}
+              {t("landing.blog.headingPrefix")}<span className="text-gradient-hot">Tredeva Learn</span>{t("landing.blog.headingSuffix")}
             </h2>
             <p className="mt-3 text-muted-foreground max-w-xl">{t("landing.blog.subtext")}</p>
           </div>
@@ -525,7 +525,7 @@ function SampleCertificateSection() {
                 <div className="flex items-center justify-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-display font-bold text-xl shadow-lg">T</div>
                   <div className="text-left">
-                    <div className="font-display font-bold text-2xl tracking-tight text-amber-900">TREDEV LEARN</div>
+                    <div className="font-display font-bold text-2xl tracking-tight text-amber-900">TREDEVA LEARN</div>
                     <div className="text-[10px] tracking-[0.32em] text-amber-800/70">वेद विद्या · A CREDENTIAL WORTH HOLDING</div>
                   </div>
                 </div>
@@ -594,7 +594,7 @@ function SampleCertificateSection() {
                           <path id="cert-seal-circle" d="M50,50 m-42,0 a42,42 0 1,1 84,0 a42,42 0 1,1 -84,0" />
                         </defs>
                         <text fontSize="6.5" fill="#78350f" fontFamily="'Plus Jakarta Sans', sans-serif" letterSpacing="4">
-                          <textPath href="#cert-seal-circle">• AUTHENTIC · VERIFIED · ĀCHARYA-SIGNED · TREDEV LEARN {year}</textPath>
+                          <textPath href="#cert-seal-circle">• AUTHENTIC · VERIFIED · ĀCHARYA-SIGNED · TREDEVA LEARN {year}</textPath>
                         </text>
                       </svg>
                     </div>

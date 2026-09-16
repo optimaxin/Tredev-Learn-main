@@ -166,7 +166,7 @@ export default function BatchDetail() {
           sessions, and roster doesn't mean scrolling through all three. */}
       <div className="mt-8">
         <Tabs defaultValue={batch.schedule_status === "approved" ? "sessions" : "schedule"} className="grid lg:grid-cols-[240px_1fr] gap-8 items-start">
-          <TabsList className="flex flex-wrap lg:flex-nowrap lg:flex-col h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3">
+          <TabsList className="flex flex-nowrap overflow-x-auto lg:overflow-visible lg:flex-col [&>*]:shrink-0 h-auto w-full items-stretch justify-start gap-1.5 bg-card border border-border rounded-2xl p-3">
             <TabsTrigger value="schedule" data-testid="batch-detail-tab-schedule" className="justify-start text-sm font-medium py-2.5 px-3 rounded-xl">
               <FileSpreadsheet className="w-4 h-4 mr-2 shrink-0" /> Class schedule
             </TabsTrigger>

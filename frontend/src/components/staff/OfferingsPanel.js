@@ -111,7 +111,7 @@ export default function OfferingsPanel({ offerings, acharyas, canEditOfferings, 
       )}
 
       <Tabs value={subTab} onValueChange={setSubTab}>
-        <TabsList className="flex-wrap h-auto">
+        <TabsList className="flex-nowrap overflow-x-auto justify-start max-w-full sm:flex-wrap sm:overflow-visible h-auto">
           <TabsTrigger value="details" data-testid="offering-tab-details">Course details</TabsTrigger>
           <TabsTrigger value="lessons" data-testid="offering-tab-lessons">Lessons ({lessons.length})</TabsTrigger>
           {selected.type === "live_course" && <TabsTrigger value="batches" data-testid="offering-tab-batches">Batches</TabsTrigger>}

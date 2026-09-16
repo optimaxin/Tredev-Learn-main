@@ -21,7 +21,7 @@ export default function Blog() {
     <div className="site-container py-16">
       <div className="chip bg-primary/15 text-primary border border-primary/30 mb-4">JOURNAL</div>
       <h1 className="font-display text-5xl md:text-6xl font-bold tracking-tight">
-        From the <span className="text-gradient-cosmic">Tredev Learn</span> Journal
+        From the <span className="text-gradient-cosmic">Tredeva Learn</span> Journal
       </h1>
       <p className="mt-4 text-lg text-muted-foreground max-w-2xl">
         Essays and reflections from India's traditions — attributed, cited, and unhurried.

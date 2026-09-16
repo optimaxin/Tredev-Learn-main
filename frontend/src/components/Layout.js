@@ -12,6 +12,7 @@ import {
 import FloatingChat from "@/components/FloatingChat";
 import LanguageToggle from "@/components/LanguageToggle";
 import { HOME } from "@/constants/testIds";
+import { portalPath } from "@/lib/roles";
 
 const NAV = [
   { to: "/courses", key: "nav.courses", testid: HOME.navCourses },
@@ -25,13 +26,6 @@ const NAV = [
   { to: "/community", key: "nav.community", testid: "nav-community" },
 ];
 
-function portalPath(role) {
-  if (role === "acharya") return "/acharya";
-  if (role === "academic_staff") return "/staff";
-  if (role === "admin" || role === "super_admin") return "/admin";
-  return "/learner";
-}
-
 export default function Layout({ children }) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
@@ -40,7 +34,7 @@ export default function Layout({ children }) {
   const loc = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => { setMobileOpen(false); }, [loc.pathname]);
+  useEffect(() => { setMobileOpen(false); window.scrollTo(0, 0); }, [loc.pathname]);
 
   const onLogout = async () => { await logout(); nav("/"); };
 
@@ -68,7 +62,7 @@ export default function Layout({ children }) {
       <header className="sticky top-4 md:top-6 z-50 px-3 sm:px-4 md:px-6">
         <div className="mx-auto max-w-6xl glass navbar-glow rounded-full shadow-float h-16 flex items-center gap-2 md:gap-6 px-3 sm:px-5">
           <Link to="/" data-testid={HOME.navLogo} className="flex items-baseline gap-2 group shrink-0 min-w-0">
-            <span className="font-display text-lg sm:text-2xl font-bold tracking-tight text-gradient-cosmic truncate">Tredev Learn</span>
+            <span className="font-display text-lg sm:text-2xl font-bold tracking-tight text-gradient-cosmic truncate">Tredeva Learn</span>
           </Link>
           <nav className="hidden xl:flex flex-1 items-center justify-center gap-4 min-w-0">
             {NAV.map((n) => (
@@ -155,7 +149,7 @@ export default function Layout({ children }) {
       <footer className="relative z-10 border-t border-border mt-24 bg-gradient-to-b from-transparent to-background">
         <div className="site-container py-16 grid md:grid-cols-4 gap-10">
           <div>
-            <div className="font-display text-2xl font-bold text-gradient-cosmic">Tredev Learn</div>
+            <Link to="/" className="font-display text-2xl font-bold text-gradient-cosmic">Tredeva Learn</Link>
             <p className="text-sm text-muted-foreground mt-3 leading-relaxed">
               {t("footer.tagline")}
             </p>
@@ -196,7 +190,7 @@ export default function Layout({ children }) {
           </div>
         </div>
         <div className="border-t border-border py-5 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Tredev Learn — {t("footer.copyright")}
+          © {new Date().getFullYear()} Tredeva Learn — {t("footer.copyright")}
         </div>
       </footer>
       <FloatingChat />

@@ -119,7 +119,7 @@ export default function AdminPortal() {
       </div>
 
       <Tabs defaultValue={isSuper ? "dashboard" : "queries"} className="mt-10">
-        <TabsList className="flex-wrap h-auto">
+        <TabsList className="flex-nowrap overflow-x-auto justify-start max-w-full sm:flex-wrap sm:overflow-visible h-auto">
           {isSuper && <TabsTrigger value="dashboard" data-testid="admin-tab-dashboard">Dashboard</TabsTrigger>}
           {isSuper && <TabsTrigger value="purchases" data-testid="admin-tab-purchases">Purchases</TabsTrigger>}
           <TabsTrigger value="queries" data-testid="admin-tab-queries">Queries</TabsTrigger>

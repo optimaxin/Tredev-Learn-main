@@ -11,7 +11,7 @@ export default function AboutUs() {
         A place to <span className="text-gradient-cosmic">study</span> —<br />not to buy predictions.
       </h1>
       <p className="mt-6 text-xl text-foreground/85 max-w-3xl leading-relaxed">
-        Tredev Learn is a credentialed digital learning platform for the Vedic knowledge systems — the Vedas, Upaniṣads, Bhagavad Gītā, the epics, Purāṇas, Sanskrit, and allied disciplines. Structured like a university, accessible like a streaming site, credentialed like a professional course.
+        Tredeva Learn is a credentialed digital learning platform for the Vedic knowledge systems — the Vedas, Upaniṣads, Bhagavad Gītā, the epics, Purāṇas, Sanskrit, and allied disciplines. Structured like a university, accessible like a streaming site, credentialed like a professional course.
       </p>
 
       <div className="mt-16 grid md:grid-cols-4 gap-6">
