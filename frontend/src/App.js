@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { CurrencyProvider } from "@/context/CurrencyContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -33,6 +33,12 @@ import ShlokaPlayer from "@/components/ShlokaPlayer";
 import { fetchDailyVerse } from "@/lib/dailyVerse";
 import { portalPath } from "@/lib/roles";
 
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  React.useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-20 text-center text-muted-foreground">…</div>;
@@ -61,6 +67,7 @@ export default function App() {
       <AuthProvider>
       <CurrencyProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <Toaster position="top-right" richColors theme="system" />
           <Layout>
             <Routes>

@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { formatApiError } from "@/lib/api";
 import { sendPhoneOtp, confirmPhoneOtp } from "@/lib/firebaseClient";
 import { portalPath } from "@/lib/roles";
+import PhoneInput from "@/components/PhoneInput";
+import useResendTimer from "@/hooks/useResendTimer";
 import { Mail, Phone, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,6 +36,8 @@ export default function Login() {
   const [phone, setPhone] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
   const [confirmation, setConfirmation] = useState(null);
+  const phoneOtpTimer = useResendTimer();
+  const emailOtpTimer = useResendTimer();
 
   const destFor = (user) => loc.state?.from || portalPath(user.role);
 
@@ -60,6 +64,7 @@ export default function Login() {
     } catch (err) {
       if (err?.response?.data?.detail === "EMAIL_NOT_VERIFIED") {
         setNeedsVerification(true);
+        emailOtpTimer.start();
         toast.error("Please verify your email before signing in.");
       } else {
         toast.error(formatApiError(err));
@@ -73,6 +78,7 @@ export default function Login() {
     try {
       const data = await resendVerification(email, password);
       toast.success(data.email_verification_sent ? "Code re-sent — check your inbox." : "Couldn't send the code — try again shortly.");
+      emailOtpTimer.start();
     } catch (err) { toast.error(formatApiError(err)); }
     setResending(false);
   }
@@ -96,8 +102,20 @@ export default function Login() {
       const result = await sendPhoneOtp(phone, "recaptcha-container");
       setConfirmation(result);
       setStep("phone-code");
+      phoneOtpTimer.start();
       toast.success("Code sent via SMS.");
     } catch (err) { toast.error(err?.message || "Couldn't send the SMS code. Check the number and try again."); }
+    setBusy(false);
+  };
+
+  const resendPhoneCode = async () => {
+    setBusy(true);
+    try {
+      const result = await sendPhoneOtp(phone, "recaptcha-container");
+      setConfirmation(result);
+      phoneOtpTimer.start();
+      toast.success("Code re-sent via SMS.");
+    } catch (err) { toast.error(err?.message || "Couldn't resend the SMS code."); }
     setBusy(false);
   };
 
@@ -185,9 +203,13 @@ export default function Login() {
                   {busy ? "Verifying…" : "Verify"}
                 </Button>
               </div>
-              <Button type="button" size="sm" variant="outline" disabled={resending} onClick={resend} className="rounded-full">
-                {resending ? "Sending…" : "Resend code"}
-              </Button>
+              {emailOtpTimer.canResend ? (
+                <Button type="button" size="sm" variant="outline" disabled={resending} onClick={resend} className="rounded-full">
+                  {resending ? "Sending…" : "Resend code"}
+                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground">Resend code in {emailOtpTimer.left}s</p>
+              )}
             </div>
           )}
         </form>
@@ -202,9 +224,8 @@ export default function Login() {
         <h1 className="text-4xl font-serif mb-8">Sign in with phone.</h1>
         <form onSubmit={sendPhoneCode} className="space-y-4">
           <div>
-            <label className="eyebrow">Phone number (with country code)</label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+919876543210" required
-              data-testid="login-phone-number" className="mt-2 h-12" />
+            <label className="eyebrow">Phone number</label>
+            <PhoneInput value={phone} onChange={setPhone} testId="login-phone-number" />
           </div>
           <Button disabled={busy || !phone} type="submit" data-testid="login-phone-send" className="w-full h-12 rounded-full">
             {busy ? "Sending…" : "Send SMS code"}
@@ -229,6 +250,13 @@ export default function Login() {
           <Button disabled={busy || phoneCode.length !== 6} type="submit" data-testid="login-phone-verify" className="w-full h-12 rounded-full">
             {busy ? "Verifying…" : "Verify & continue"}
           </Button>
+          {phoneOtpTimer.canResend ? (
+            <Button type="button" variant="outline" disabled={busy} onClick={resendPhoneCode} className="w-full h-12 rounded-full">
+              Resend OTP
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">Resend OTP in {phoneOtpTimer.left}s</p>
+          )}
         </form>
       </div>
     );

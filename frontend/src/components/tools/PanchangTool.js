@@ -18,7 +18,7 @@ const LABELS_EN = {
 
 function InfoCard({ label, value, hi }) {
   return (
-    <div className="border-b border-border py-3 flex items-baseline justify-between gap-4">
+    <div className="border-b border-border py-3 flex items-baseline justify-between gap-4 flex-wrap">
       <span className={hi ? "eyebrow-hi" : "eyebrow"}>{label}</span>
       <span className="font-serif text-lg text-foreground text-right">{value}</span>
     </div>
@@ -94,9 +94,9 @@ export default function PanchangTool() {
 
         <div className="mt-6">
           <Label className="eyebrow">{t("tools.panchang.location")}</Label>
-          <div className="flex items-center gap-3 mt-2">
+          <div className="flex flex-wrap items-center gap-3 mt-2">
             <Select value={city} onValueChange={onCityChange}>
-              <SelectTrigger className="h-11 max-w-xs" data-testid="panchang-city">
+              <SelectTrigger className="h-11 w-full min-w-0 sm:w-auto sm:max-w-xs" data-testid="panchang-city">
                 <SelectValue placeholder={t("tools.panchang.chooseCity")} />
               </SelectTrigger>
               <SelectContent>
@@ -116,7 +116,7 @@ export default function PanchangTool() {
       </div>
 
       {display && (
-        <div className={`rounded-lg border border-border p-8 bg-card/50 animate-fade-in-up ${lang === "hi" ? "font-devanagari" : ""}`} data-testid="panchang-result">
+        <div className={`rounded-lg border border-border p-5 sm:p-8 bg-card/50 animate-fade-in-up ${lang === "hi" ? "font-devanagari" : ""}`} data-testid="panchang-result">
           <div className={`text-primary ${hi ? "eyebrow-hi" : "eyebrow"} mb-4 font-sans`}>{display.date}</div>
           <InfoCard label={labels.vara} value={display.vara} hi={hi} />
           <InfoCard label={labels.tithi} value={`${display.paksha} · ${display.tithi}`} hi={hi} />

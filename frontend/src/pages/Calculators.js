@@ -80,15 +80,15 @@ export default function Calculators() {
 
   return (
     <div className="site-container py-16">
-      <div className="rounded-xl bg-background/85 backdrop-blur-sm border border-border/50 p-6 md:p-8 mb-10 inline-block max-w-3xl">
+      <div className="rounded-xl bg-background/85 backdrop-blur-sm border border-border/50 p-6 md:p-8 mb-10 max-w-3xl">
         <div className="eyebrow mb-3">{t("tools.calculatorsPage.heading")}</div>
-        <h1 className="text-5xl md:text-6xl font-serif tracking-tight mb-4">{t("tools.calculatorsPage.titlePlain")}<br/><em className="text-primary not-italic">{t("tools.calculatorsPage.titleEm")}</em></h1>
+        <h1 className="text-3xl sm:text-5xl md:text-6xl font-serif tracking-tight mb-4">{t("tools.calculatorsPage.titlePlain")}<br/><em className="text-primary not-italic">{t("tools.calculatorsPage.titleEm")}</em></h1>
         <p className="text-foreground/70 max-w-2xl leading-relaxed">
           {t("tools.calculatorsPage.subtext")}
         </p>
       </div>
       <Tabs defaultValue={initialTab}>
-        <TabsList className="mb-8 flex-nowrap overflow-x-auto justify-start max-w-full sm:flex-wrap sm:overflow-visible h-auto bg-background/85 backdrop-blur-sm">
+        <TabsList className="mb-8 flex-wrap justify-start h-auto gap-1.5 bg-background/85 backdrop-blur-sm">
           <TabsTrigger value="panchang" data-testid="tab-panchang">{t("tools.calculatorsPage.tabPanchang")}</TabsTrigger>
           <TabsTrigger value="numerology" data-testid="tab-numerology">{t("tools.calculatorsPage.tabNumerology")}</TabsTrigger>
           <TabsTrigger value="kundli" data-testid="tab-kundli">{t("tools.calculatorsPage.tabKundli")}</TabsTrigger>

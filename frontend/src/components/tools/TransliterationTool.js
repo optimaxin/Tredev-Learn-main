@@ -75,10 +75,10 @@ export default function TransliterationTool() {
       </div>
 
       <div className="grid md:grid-cols-[1fr_auto_1fr] gap-6 items-start">
-        <div className="rounded-lg border border-border bg-card/50 p-5">
-          <div className="flex items-center justify-between mb-2 gap-2">
+        <div className="rounded-lg border border-border bg-card/50 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between mb-2 gap-2">
             <Select value={leftScheme} onValueChange={onLeftSchemeChange}>
-              <SelectTrigger className="h-9 w-56" data-testid="translit-scheme-left">
+              <SelectTrigger className="h-9 w-full sm:w-56" data-testid="translit-scheme-left">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -99,7 +99,7 @@ export default function TransliterationTool() {
           <Textarea
             value={leftText}
             onChange={onLeftTextChange}
-            className={`min-h-[220px] ${boxStyle(leftOption)}`}
+            className={`min-h-[160px] sm:min-h-[220px] ${boxStyle(leftOption)}`}
             data-testid="translit-box-left"
             placeholder={t("tools.translit.typeHere")}
           />
@@ -109,17 +109,17 @@ export default function TransliterationTool() {
           variant="outline"
           size="icon"
           onClick={swap}
-          className="rounded-full mt-9 mx-auto md:mx-0"
+          className="rounded-full mx-auto md:mt-9 md:mx-0"
           data-testid="translit-swap"
           aria-label={t("tools.translit.swapScripts")}
         >
-          <ArrowLeftRight className="w-4 h-4" />
+          <ArrowLeftRight className="w-4 h-4 rotate-90 md:rotate-0" />
         </Button>
 
-        <div className="rounded-lg border border-border bg-card/50 p-5">
-          <div className="flex items-center justify-between mb-2 gap-2">
+        <div className="rounded-lg border border-border bg-card/50 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between mb-2 gap-2">
             <Select value={rightScheme} onValueChange={onRightSchemeChange}>
-              <SelectTrigger className="h-9 w-56" data-testid="translit-scheme-right">
+              <SelectTrigger className="h-9 w-full sm:w-56" data-testid="translit-scheme-right">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -140,7 +140,7 @@ export default function TransliterationTool() {
           <Textarea
             value={rightText}
             onChange={onRightTextChange}
-            className={`min-h-[220px] ${boxStyle(rightOption)}`}
+            className={`min-h-[160px] sm:min-h-[220px] ${boxStyle(rightOption)}`}
             data-testid="translit-box-right"
             placeholder={t("tools.translit.typeHere")}
           />
