@@ -178,12 +178,14 @@ export default function QueriesStaff() {
         </TabsList>
       </Tabs>
       <div className="grid lg:grid-cols-[360px_1fr] gap-6">
-        <QueryTicketList
-          tickets={lists[queue]} selectedId={selected?.id} onSelect={setSelected}
-          search={search} onSearchChange={setSearch} mode="staff" loading={loadingList}
-          emptyLabel={EMPTY_LABELS[queue]} testidPrefix="staff-query"
-        />
-        <div className="space-y-3">
+        <div className={selected ? "hidden lg:block" : ""}>
+          <QueryTicketList
+            tickets={lists[queue]} selectedId={selected?.id} onSelect={setSelected}
+            search={search} onSearchChange={setSearch} mode="staff" loading={loadingList}
+            emptyLabel={EMPTY_LABELS[queue]} testidPrefix="staff-query"
+          />
+        </div>
+        <div className={`space-y-3 ${selected ? "" : "hidden lg:block"}`}>
           {selected && (
             <div className="rounded-xl border border-border bg-card p-3 flex flex-wrap items-center gap-3" data-testid="query-action-bar">
               {isAdmin && (
@@ -226,7 +228,7 @@ export default function QueriesStaff() {
           <QueryChatThread
             ticket={selected} messages={messages} mode="staff"
             onSend={handleSend} onClose={handleClose} sending={sending} closing={closing}
-            canClose={canClose}
+            canClose={canClose} onBack={() => setSelected(null)}
           />
         </div>
       </div>

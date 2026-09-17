@@ -3,11 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Lock, XCircle } from "lucide-react";
+import { Send, Lock, XCircle, ChevronLeft } from "lucide-react";
 import { fmtTime, fmtDate, STATUS_BADGE } from "@/lib/queryUtils";
 
 /** Right panel — the active chat thread for a selected ticket. Shared by both portals. */
-export default function QueryChatThread({ ticket, messages, mode, onSend, onClose, sending, closing, canClose }) {
+export default function QueryChatThread({ ticket, messages, mode, onSend, onClose, sending, closing, canClose, onBack }) {
   const [text, setText] = useState("");
   const bottomRef = useRef(null);
 
@@ -37,6 +37,11 @@ export default function QueryChatThread({ ticket, messages, mode, onSend, onClos
   return (
     <div className="rounded-2xl border border-border bg-card flex flex-col h-[70vh] min-h-[520px]" data-testid="query-thread">
       <div className="p-4 border-b border-border flex items-center gap-3">
+        {onBack && (
+          <button type="button" onClick={onBack} className="lg:hidden -ml-1 p-1 text-muted-foreground hover:text-foreground" data-testid="query-back-btn" aria-label="Back to list">
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        )}
         <Avatar className="w-10 h-10">
           <AvatarFallback className="bg-gradient-hot text-white font-semibold">{headerName[0]?.toUpperCase() || "?"}</AvatarFallback>
         </Avatar>

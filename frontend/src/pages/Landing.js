@@ -8,6 +8,7 @@ import { HOME } from "@/constants/testIds";
 import ShlokaPlayer from "@/components/ShlokaPlayer";
 import CourseCard from "@/components/CourseCard";
 import MentorCard from "@/components/MentorCard";
+import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext } from "@/components/ui/carousel";
 import {
   Star, Clock, Sparkles, Play,
   Calculator, Compass, Hand, Languages, ScrollText, Wand2, ArrowRight, CheckCircle2, Quote,
@@ -55,7 +56,7 @@ function Hero({ stats }) {
             <h1 className="mt-6 font-hero text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.02] tracking-tight text-foreground" data-testid="landing-hero">
               {t("landing.hero.title")}
             </h1>
-            <p className="mt-6 text-lg text-foreground/80 leading-relaxed max-w-xl">{t("landing.hero.subtitle")}</p>
+            <p className="hidden sm:block mt-6 text-lg text-foreground/80 leading-relaxed max-w-xl">{t("landing.hero.subtitle")}</p>
             <div className="mt-8 flex flex-wrap gap-4">
               <Link to="/courses" data-testid={HOME.ctaExplore}>
                 <Button size="lg" className="rounded-full h-14 px-10 bg-primary text-primary-foreground border-0 hover:opacity-95">
@@ -338,12 +339,6 @@ function MentorsSection({ mentors }) {
 
 function TestimonialsSection({ testimonials }) {
   const { t } = useTranslation();
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    if (!testimonials?.length) return;
-    const timer = setInterval(() => setIdx((i) => (i + 1) % testimonials.length), 5500);
-    return () => clearInterval(timer);
-  }, [testimonials?.length]);
   if (!testimonials?.length) return null;
   return (
     <section className="py-20 md:py-28 relative overflow-hidden">
@@ -356,26 +351,31 @@ function TestimonialsSection({ testimonials }) {
             1,00,000+ <span className="text-gradient-hot">{t("landing.testimonials.headingHighlight")}</span><br />{t("landing.testimonials.headingRest")}
           </h2>
         </div>
-        <div className="grid md:grid-cols-3 gap-5">
-          {testimonials.map((tst, i) => (
-            <div key={tst.id} data-testid={`testimonial-${i}`}
-              className={`rounded-2xl border border-border p-8 bg-card card-elevated relative ${i === idx % 3 ? "ring-2 ring-primary/40" : ""}`}>
-              <Quote className="w-6 h-6 text-accent mb-4" />
-              <div className="flex items-center gap-1 mb-4">
-                {Array.from({ length: tst.rating || 5 }).map((_, j) => <Star key={j} className="w-4 h-4 fill-accent text-accent" />)}
-              </div>
-              <p className="text-sm leading-relaxed text-foreground/85 line-clamp-6">"{tst.quote}"</p>
-              <div className="mt-6 flex items-center gap-3">
-                <img src={tst.avatar} alt={tst.name} className="w-11 h-11 rounded-full object-cover border-2 border-accent/40" />
-                <div>
-                  <div className="font-display font-semibold">{tst.name}</div>
-                  <div className="text-xs text-muted-foreground">{tst.role}</div>
+        <Carousel opts={{ align: "start", loop: true }} className="md:px-12">
+          <CarouselContent>
+            {testimonials.map((tst, i) => (
+              <CarouselItem key={tst.id} className="basis-full sm:basis-1/2 lg:basis-1/3">
+                <div data-testid={`testimonial-${i}`} className="rounded-2xl border border-border p-8 bg-card card-elevated relative h-full">
+                  <Quote className="w-6 h-6 text-accent mb-4" />
+                  <div className="flex items-center gap-1 mb-4">
+                    {Array.from({ length: tst.rating || 5 }).map((_, j) => <Star key={j} className="w-4 h-4 fill-accent text-accent" />)}
+                  </div>
+                  <p className="text-sm leading-relaxed text-foreground/85 line-clamp-6">"{tst.quote}"</p>
+                  <div className="mt-6 flex items-center gap-3">
+                    <img src={tst.avatar} alt={tst.name} className="w-11 h-11 rounded-full object-cover border-2 border-accent/40" />
+                    <div>
+                      <div className="font-display font-semibold">{tst.name}</div>
+                      <div className="text-xs text-muted-foreground">{tst.role}</div>
+                    </div>
+                  </div>
+                  {tst.course && <div className="mt-3 chip bg-muted text-muted-foreground">{tst.course}</div>}
                 </div>
-              </div>
-              {tst.course && <div className="mt-3 chip bg-muted text-muted-foreground">{tst.course}</div>}
-            </div>
-          )).slice(0, 3)}
-        </div>
+              </CarouselItem>
+            ))}
+          </CarouselContent>
+          <CarouselPrevious className="hidden md:flex" />
+          <CarouselNext className="hidden md:flex" />
+        </Carousel>
       </div>
     </section>
   );
@@ -494,11 +494,11 @@ function SampleCertificateSection() {
         {/* Certificate card */}
         <div className="max-w-4xl mx-auto">
           <div className="relative rounded-2xl p-1 bg-gradient-to-br from-primary via-secondary to-accent shadow-[0_30px_80px_-20px_hsl(244_49%_20%/0.45)]" data-testid="sample-certificate">
-            <div className="relative rounded-[14px] p-8 md:p-14 overflow-hidden"
+            <div className="relative rounded-[14px] p-5 sm:p-8 md:p-14 overflow-hidden"
                  style={{ background: "linear-gradient(135deg, #fdf7e8 0%, #f6ecd0 50%, #f0dfae 100%)" }}>
               {/* Watermark 🕉 */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none opacity-[0.045]">
-                <span className="text-[28rem] leading-none font-devanagari text-amber-900">ॐ</span>
+                <span className="text-[14rem] sm:text-[20rem] md:text-[28rem] leading-none font-devanagari text-amber-900">ॐ</span>
               </div>
 
               {/* Ornate corner flourishes */}
@@ -544,7 +544,7 @@ function SampleCertificateSection() {
                 {/* Recipient */}
                 <div className="mt-8">
                   <div className="text-xs tracking-[0.28em] uppercase text-amber-800/70">This is to certify that</div>
-                  <div className="font-display font-bold text-5xl md:text-6xl mt-3 tracking-tight text-amber-950" style={{ fontFeatureSettings: '"liga","dlig"' }}>
+                  <div className="font-display font-bold text-3xl sm:text-5xl md:text-6xl mt-3 tracking-tight text-amber-950" style={{ fontFeatureSettings: '"liga","dlig"' }}>
                     Priyā Sharmā
                   </div>
                   <div className="mt-4 max-w-2xl mx-auto text-sm md:text-base text-amber-900/85 leading-relaxed">
@@ -566,7 +566,7 @@ function SampleCertificateSection() {
                 </div>
 
                 {/* Signatures + Seal */}
-                <div className="grid grid-cols-3 gap-6 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 items-center sm:items-end">
                   {/* Ācharya sign */}
                   <div className="text-center">
                     <div className="font-editorial italic text-xl md:text-2xl text-amber-950 -mb-1">
@@ -613,7 +613,7 @@ function SampleCertificateSection() {
                 </div>
 
                 {/* Verification footer */}
-                <div className="mt-10 flex items-center justify-between text-[10px] tracking-widest uppercase text-amber-800/80 border-t border-amber-800/25 pt-4">
+                <div className="mt-10 flex flex-col sm:flex-row items-center sm:justify-between gap-1.5 sm:gap-0 text-[10px] tracking-widest uppercase text-amber-800/80 border-t border-amber-800/25 pt-4">
                   <div>Issued {new Date().toLocaleDateString(undefined, { day: "2-digit", month: "long", year: "numeric" })}</div>
                   <div>Verify at <span className="underline decoration-amber-800/40">tredevlearn.com/verify</span></div>
                   <div className="font-mono">TDL-8F3A-{year}</div>
@@ -648,7 +648,7 @@ function ConsultationCTA() {
   return (
     <section className="py-20 md:py-28">
       <div className="site-container">
-        <div className="relative rounded-3xl overflow-hidden border border-accent/30 bg-gradient-cosmic p-10 md:p-16 grid md:grid-cols-[1.1fr_1fr] gap-12 items-center">
+        <div className="relative rounded-3xl overflow-hidden border border-accent/30 bg-gradient-cosmic p-6 sm:p-10 md:p-16 grid lg:grid-cols-[1.1fr_1fr] gap-8 lg:gap-12 items-center">
           <div className="orb orb-saffron w-72 h-72 -top-20 -right-10" />
           <div className="orb orb-gold w-64 h-64 -bottom-20 -left-10" />
           <div className="relative">
@@ -663,7 +663,7 @@ function ConsultationCTA() {
               <li className="flex gap-3"><CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5"/> {t("landing.consultation.bullet3")}</li>
             </ul>
           </div>
-          <div className="relative text-center md:text-right">
+          <div className="relative text-center lg:text-right">
             <Link to="/consultation" data-testid={HOME.ctaConsultation}>
               <Button size="lg" className="rounded-full h-14 px-10 bg-gradient-hot text-white btn-glow border-0 text-base">
                 {t("landing.consultation.cta")} <ArrowRight className="w-5 h-5 ml-2" />

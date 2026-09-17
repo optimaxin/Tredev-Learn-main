@@ -76,12 +76,12 @@ export default function ShlokaPlayer({ verse }) {
     <div className="relative rounded-lg border border-border bg-card/60 overflow-hidden animate-fade-in-up" data-testid="shloka-player">
       <div className="grid lg:grid-cols-[1.15fr_1fr]">
         {/* LEFT — Verse */}
-        <div className="p-8 lg:p-14 border-b lg:border-b-0 lg:border-r border-border">
+        <div className="p-5 sm:p-8 lg:p-14 border-b lg:border-b-0 lg:border-r border-border">
           <div className="flex items-baseline gap-3 mb-8">
             <div className="eyebrow text-primary">{verse.scripture}</div>
             <div className="text-xs text-muted-foreground tabular">{verse.reference}</div>
           </div>
-          <div className="font-devanagari text-3xl md:text-4xl leading-[1.9] tracking-wide text-foreground whitespace-pre-line" data-testid="shloka-devanagari">
+          <div className="font-devanagari text-2xl sm:text-3xl md:text-4xl leading-[1.7] sm:leading-[1.9] tracking-wide text-foreground whitespace-pre-line" data-testid="shloka-devanagari">
             {verse.devanagari}
           </div>
           <div className="mt-8 pt-8 border-t border-border/60">
@@ -120,8 +120,8 @@ export default function ShlokaPlayer({ verse }) {
         </div>
 
         {/* RIGHT — Attribution */}
-        <div className="p-8 lg:p-14">
-          <div className="flex gap-1 mb-6">
+        <div className="p-5 sm:p-8 lg:p-14">
+          <div className="flex flex-wrap gap-2 mb-6">
             {[
               { k: "translations", label: `Translations · ${translations.length}` },
               { k: "commentaries", label: `Commentaries · ${commentaries.length}` },
@@ -130,7 +130,7 @@ export default function ShlokaPlayer({ verse }) {
                 key={t.k}
                 onClick={() => setTab(t.k)}
                 data-testid={`shloka-tab-${t.k}`}
-                className={`text-xs uppercase tracking-widest px-3 py-2 rounded-full border transition-colors ${tab === t.k ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"}`}
+                className={`text-xs uppercase tracking-widest px-3 py-2 rounded-full border transition-colors whitespace-nowrap ${tab === t.k ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"}`}
               >
                 {t.label}
               </button>
@@ -160,20 +160,20 @@ export default function ShlokaPlayer({ verse }) {
       </div>
 
       {/* Audio bar */}
-      <div className="glass border-t border-border p-4 md:p-5 flex items-center gap-4">
+      <div className="glass border-t border-border p-4 md:p-5 flex items-center gap-3 sm:gap-4">
         <button
           onClick={togglePlay}
           disabled={(!verse?.devanagari && !verse?.iast) || !speechSupported}
           data-testid="shloka-play-btn"
           title="Play pronunciation"
-          className="w-11 h-11 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40">
+          className="w-11 h-11 shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40">
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
         </button>
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="h-1 rounded-full bg-muted overflow-hidden">
             <div className="h-full bg-accent transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground uppercase tracking-widest flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-3 mt-2 text-[11px] text-muted-foreground uppercase tracking-widest flex-wrap">
             <Gauge className="w-3 h-3" />
             {[0.5, 0.75, 1, 1.25, 1.5].map((s) => (
               <button key={s} onClick={() => setSpeed(s)}

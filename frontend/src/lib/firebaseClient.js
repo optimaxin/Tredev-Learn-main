@@ -48,3 +48,13 @@ export async function confirmPhoneOtp(confirmationResult, code) {
   const { user } = await confirmationResult.confirm(code);
   return user.getIdToken();
 }
+
+/** Re-fetches a fresh ID token for the signed-in Firebase user. Call this
+ * right before a backend call that happens a while after the initial
+ * sign-in (e.g. after the user has been filling out a profile form), so the
+ * backend never gets handed a token that's gone stale in the meantime. */
+export async function refreshIdToken() {
+  const auth = getFirebaseAuth();
+  if (!auth.currentUser) return null;
+  return auth.currentUser.getIdToken(true);
+}

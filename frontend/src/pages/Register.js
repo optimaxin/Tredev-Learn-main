@@ -4,7 +4,9 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatApiError } from "@/lib/api";
-import { sendPhoneOtp, confirmPhoneOtp } from "@/lib/firebaseClient";
+import { sendPhoneOtp, confirmPhoneOtp, refreshIdToken } from "@/lib/firebaseClient";
+import PhoneInput from "@/components/PhoneInput";
+import useResendTimer from "@/hooks/useResendTimer";
 import { Mail, Phone, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,6 +46,9 @@ export default function Register() {
   const [phoneName, setPhoneName] = useState("");
   const [phoneEmail, setPhoneEmail] = useState("");
 
+  const emailOtpTimer = useResendTimer();
+  const phoneOtpTimer = useResendTimer();
+
   const back = () => setStep("choose");
 
   const submitGoogle = async () => {
@@ -63,6 +68,7 @@ export default function Register() {
       const data = await register(email, password);
       setSent(!!data.email_verification_sent);
       setStep("email-otp");
+      emailOtpTimer.start();
     } catch (err) { toast.error(formatApiError(err)); }
     setBusy(false);
   };
@@ -84,6 +90,7 @@ export default function Register() {
       const data = await resendVerification(email, password);
       setSent(!!data.email_verification_sent);
       toast.success(data.email_verification_sent ? "Code re-sent — check your inbox." : "Couldn't send the code — try again shortly.");
+      emailOtpTimer.start();
     } catch (err) { toast.error(formatApiError(err)); }
     setResending(false);
   };
@@ -106,8 +113,20 @@ export default function Register() {
       const result = await sendPhoneOtp(phone, "recaptcha-container");
       setConfirmation(result);
       setStep("phone-otp");
+      phoneOtpTimer.start();
       toast.success("Code sent via SMS.");
     } catch (err) { toast.error(err?.message || "Couldn't send the SMS code. Check the number and try again."); }
+    setBusy(false);
+  };
+
+  const resendPhoneCode = async () => {
+    setBusy(true);
+    try {
+      const result = await sendPhoneOtp(phone, "recaptcha-container");
+      setConfirmation(result);
+      phoneOtpTimer.start();
+      toast.success("Code re-sent via SMS.");
+    } catch (err) { toast.error(err?.message || "Couldn't resend the SMS code."); }
     setBusy(false);
   };
 
@@ -126,7 +145,8 @@ export default function Register() {
     e.preventDefault();
     setBusy(true);
     try {
-      const user = await loginWithPhone(phoneIdToken, { name: phoneName, email: phoneEmail });
+      const freshToken = (await refreshIdToken()) || phoneIdToken;
+      const user = await loginWithPhone(freshToken, { name: phoneName, email: phoneEmail });
       toast.success(`Welcome, ${user.name}.`);
       nav("/learner");
     } catch (err) { toast.error(formatApiError(err)); }
@@ -209,9 +229,13 @@ export default function Register() {
           <Button disabled={busy || code.length !== 6} type="submit" data-testid="register-otp-submit" className="w-full h-12 rounded-full">
             {busy ? "Verifying…" : "Verify & continue"}
           </Button>
-          <Button type="button" variant="outline" disabled={resending} onClick={resendEmailCode} className="w-full h-12 rounded-full">
-            {resending ? "Sending…" : "Resend code"}
-          </Button>
+          {emailOtpTimer.canResend ? (
+            <Button type="button" variant="outline" disabled={resending} onClick={resendEmailCode} className="w-full h-12 rounded-full">
+              {resending ? "Sending…" : "Resend code"}
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">Resend code in {emailOtpTimer.left}s</p>
+          )}
         </form>
       </div>
     );
@@ -248,9 +272,8 @@ export default function Register() {
         <h1 className="text-4xl font-serif mb-8">Sign up with phone.</h1>
         <form onSubmit={submitPhoneNumber} className="space-y-4">
           <div>
-            <label className="eyebrow">Phone number (with country code)</label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+919876543210" required
-              data-testid="register-phone-number" className="mt-2 h-12" />
+            <label className="eyebrow">Phone number</label>
+            <PhoneInput value={phone} onChange={setPhone} testId="register-phone-number" />
           </div>
           <Button disabled={busy || !phone} type="submit" data-testid="register-phone-send" className="w-full h-12 rounded-full">
             {busy ? "Sending…" : "Send SMS code"}
@@ -275,6 +298,13 @@ export default function Register() {
           <Button disabled={busy || phoneCode.length !== 6} type="submit" data-testid="register-phone-verify" className="w-full h-12 rounded-full">
             {busy ? "Verifying…" : "Verify & continue"}
           </Button>
+          {phoneOtpTimer.canResend ? (
+            <Button type="button" variant="outline" disabled={busy} onClick={resendPhoneCode} className="w-full h-12 rounded-full">
+              Resend OTP
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">Resend OTP in {phoneOtpTimer.left}s</p>
+          )}
         </form>
       </div>
     );

@@ -86,17 +86,21 @@ export default function QueriesUser() {
 
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6" data-testid="queries-user">
-      <QueryTicketList
-        tickets={tickets} selectedId={selected?.id} onSelect={setSelected}
-        search={search} onSearchChange={setSearch} mode="user" loading={loadingList}
-        createAction={<CreateQueryDialog onCreated={handleCreated} />}
-        emptyLabel={t("queriesUser.empty")} testidPrefix="user-query"
-      />
-      <QueryChatThread
-        ticket={selected} messages={messages} mode="user"
-        onSend={handleSend} onClose={handleClose} sending={sending} closing={closing}
-        canClose={!!selected}
-      />
+      <div className={selected ? "hidden lg:block" : ""}>
+        <QueryTicketList
+          tickets={tickets} selectedId={selected?.id} onSelect={setSelected}
+          search={search} onSearchChange={setSearch} mode="user" loading={loadingList}
+          createAction={<CreateQueryDialog onCreated={handleCreated} />}
+          emptyLabel={t("queriesUser.empty")} testidPrefix="user-query"
+        />
+      </div>
+      <div className={selected ? "" : "hidden lg:block"}>
+        <QueryChatThread
+          ticket={selected} messages={messages} mode="user"
+          onSend={handleSend} onClose={handleClose} sending={sending} closing={closing}
+          canClose={!!selected} onBack={() => setSelected(null)}
+        />
+      </div>
     </div>
   );
 }
